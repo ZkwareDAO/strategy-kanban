@@ -46,11 +46,35 @@
         </div>
       </div>
 
-      <!-- Chart -->
-      <PriceRoiChart :timeline-data="klineData" />
+      <!-- Chart Version Toggle -->
+      <div class="chart-version-toggle">
+        <button
+          :class="['version-btn', { active: chartVersion === 'v1' }]"
+          @click="chartVersion = 'v1'"
+        >
+          V1 价格/ROI
+        </button>
+        <button
+          :class="['version-btn', { active: chartVersion === 'v2' }]"
+          @click="chartVersion = 'v2'"
+        >
+          V2 技术指标
+        </button>
+      </div>
 
-      <!-- Indicators -->
-      <IndicatorCard :indicators="mockIndicators" />
+      <!-- Chart -->
+      <PriceRoiChart v-if="chartVersion === 'v1'" :timeline-data="klineData" />
+
+      <!-- Technical Chart V2 -->
+      <template v-else>
+        <IndicatorPanel v-model="selectedIndicators" />
+        <TechnicalChart
+          :kline-data="klineData"
+          :strategy="strategy"
+          :symbol="symbol"
+          :indicators="selectedIndicators"
+        />
+      </template>
 
       <!-- Comparison -->
       <ComparisonReport :comparison="comparisonData" />
@@ -63,10 +87,12 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { getKline, getComparison } from '@/api/strategy'
 import PriceRoiChart from '@/components/detail/PriceRoiChart.vue'
-import IndicatorCard from '@/components/detail/IndicatorCard.vue'
+import TechnicalChart from '@/components/detail/TechnicalChart.vue'
+import IndicatorPanel from '@/components/detail/IndicatorPanel.vue'
 import ComparisonReport from '@/components/detail/ComparisonReport.vue'
-import type { StrategyLogic as StrategyLogicType, TechnicalIndicator, SignalComparison } from '@/models/detail'
+import type { StrategyLogic as StrategyLogicType, SignalComparison } from '@/models/detail'
 import type { KlinePoint } from '@/models/kline'
+import type { IndicatorType } from '@/indicators'
 
 const props = defineProps<{
   strategy: string
@@ -113,8 +139,10 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const klineData = ref<KlinePoint[]>([])
 const comparisonData = ref<SignalComparison | undefined>(undefined)
+const selectedIndicators = ref<IndicatorType[]>(['RSI', 'MACD', 'ATR'])
+const chartVersion = ref<'v1' | 'v2'>('v2')
 
-// Mock data for strategy logic and indicators (这些数据暂无API，保持mock)
+// Mock data for strategy logic (这些数据暂无API，保持mock)
 const mockLogic: StrategyLogicType = {
   entry_conditions: {
     title: '入场条件',
@@ -129,15 +157,6 @@ const mockLogic: StrategyLogicType = {
     rules: ['单笔最大仓位 10%', '最大持仓数 5', '日最大亏损 5%'],
   },
 }
-
-const mockIndicators: TechnicalIndicator[] = [
-  { name: 'RSI(14)', value: '45.2', signal: '中性' },
-  { name: 'MACD', value: '-120.5', signal: '看空' },
-  { name: '布林带', value: '下轨附近', signal: '超卖' },
-  { name: 'MA20', value: '65,200', signal: '' },
-  { name: 'ATR', value: '1,250', signal: '' },
-  { name: '成交量', value: '2.3M', signal: '放量' },
-]
 
 async function fetchData() {
   if (!runtimeName.value || !date.value) {
@@ -284,6 +303,32 @@ onMounted(fetchData)
 
   li {
     margin-bottom: 3px;
+  }
+}
+
+.chart-version-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.version-btn {
+  padding: 8px 16px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: #f9fafb;
+  }
+
+  &.active {
+    background: #3b82f6;
+    color: white;
+    border-color: #3b82f6;
   }
 }
 </style>
