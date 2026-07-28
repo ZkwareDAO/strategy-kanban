@@ -52,13 +52,13 @@
           :class="['version-btn', { active: chartVersion === 'v1' }]"
           @click="chartVersion = 'v1'"
         >
-          V1 价格/ROI
+          价格/ROI
         </button>
         <button
           :class="['version-btn', { active: chartVersion === 'v2' }]"
           @click="chartVersion = 'v2'"
         >
-          V2 技术指标
+          技术指标
         </button>
       </div>
 
@@ -67,12 +67,20 @@
 
       <!-- Technical Chart V2 -->
       <template v-else>
+        <TimeframeSelector
+          v-model="selectedTimeframe"
+          v-model:display-count="displayCount"
+        />
+        <div v-if="dataWarning" class="data-warning">
+          ⚠️ {{ dataWarning }}
+        </div>
         <IndicatorPanel v-model="selectedIndicators" />
         <TechnicalChart
-          :kline-data="klineData"
+          :kline-data="processedKlineData"
           :strategy="strategy"
           :symbol="symbol"
           :indicators="selectedIndicators"
+          :display-count="displayCount"
         />
       </template>
 
@@ -83,15 +91,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getKline, getComparison } from '@/api/strategy'
+import { resampleKline, getDefaultDisplayCount } from '@/utils/resample'
 import PriceRoiChart from '@/components/detail/PriceRoiChart.vue'
 import TechnicalChart from '@/components/detail/TechnicalChart.vue'
 import IndicatorPanel from '@/components/detail/IndicatorPanel.vue'
+import TimeframeSelector from '@/components/detail/TimeframeSelector.vue'
 import ComparisonReport from '@/components/detail/ComparisonReport.vue'
 import type { StrategyLogic as StrategyLogicType, SignalComparison } from '@/models/detail'
-import type { KlinePoint } from '@/models/kline'
+import type { KlinePoint, TimeframeValue } from '@/models/kline'
 import type { IndicatorType } from '@/indicators'
 
 const props = defineProps<{
@@ -141,6 +151,30 @@ const klineData = ref<KlinePoint[]>([])
 const comparisonData = ref<SignalComparison | undefined>(undefined)
 const selectedIndicators = ref<IndicatorType[]>(['RSI', 'MACD', 'ATR'])
 const chartVersion = ref<'v1' | 'v2'>('v2')
+const selectedTimeframe = ref<TimeframeValue>('1m')
+const displayCount = ref(100)
+
+// 重采样数据
+const processedKlineData = computed(() => {
+  if (!klineData.value.length) return []
+  return resampleKline(klineData.value, selectedTimeframe.value)
+})
+
+// 数据量警告
+const dataWarning = computed(() => {
+  const resampledLength = processedKlineData.value.length
+  const minRequired = 20 // 最少需要 20 根 K 线
+
+  if (resampledLength < minRequired) {
+    return `当前周期数据不足（${resampledLength} 根），建议选择更短的时间周期或查看更长时间范围的数据`
+  }
+  return null
+})
+
+// 监听时间周期变化，更新默认显示数量
+watch(selectedTimeframe, (tf) => {
+  displayCount.value = getDefaultDisplayCount(tf)
+}, { immediate: true })
 
 // Mock data for strategy logic (这些数据暂无API，保持mock)
 const mockLogic: StrategyLogicType = {
@@ -330,5 +364,15 @@ onMounted(fetchData)
     color: white;
     border-color: #3b82f6;
   }
+}
+
+.data-warning {
+  padding: 0.75rem 1rem;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  color: #92400e;
+  font-size: 0.9rem;
 }
 </style>

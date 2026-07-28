@@ -20,12 +20,14 @@ interface Props {
   strategy?: string
   symbol?: string
   indicators?: IndicatorType[]
+  displayCount?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
   strategy: '',
   symbol: '',
   indicators: () => ['RSI', 'MACD', 'ATR'] as IndicatorType[],
+  displayCount: 100,
 })
 
 const chartContainer = ref<HTMLDivElement>()
@@ -34,7 +36,7 @@ onMounted(() => {
   renderChart()
 })
 
-watch([() => props.klineData, () => props.strategy, () => props.indicators], () => {
+watch([() => props.klineData, () => props.strategy, () => props.indicators, () => props.displayCount], () => {
   renderChart()
 }, { deep: true })
 
@@ -47,7 +49,9 @@ function getIndicatorParams(strategyName: string) {
 function renderChart() {
   if (!chartContainer.value || props.klineData.length === 0) return
 
-  const timestamps = props.klineData.map(d => d.datetime)
+  // 使用全量数据，不截断
+  const displayData = props.klineData
+  const timestamps = displayData.map(d => d.datetime)
   const indicatorParams = getIndicatorParams(props.strategy)
   const indicators = createIndicators(props.indicators, indicatorParams)
 
@@ -56,12 +60,12 @@ function renderChart() {
   // Compute indicators first to get values for hover text
   const indicatorValues: Record<string, IndicatorResult> = {}
   for (const indicator of indicators) {
-    const result = indicator.compute(props.klineData)
+    const result = indicator.compute(displayData)
     indicatorValues[indicator.name] = result
   }
 
   // Build hover text for candlestick (basic info only)
-  const candleHoverText = props.klineData.map((d) => {
+  const candleHoverText = displayData.map((d) => {
     const parts = [
       `时间: ${d.datetime}`,
       `开: ${d.open.toFixed(2)}`,
@@ -75,10 +79,10 @@ function renderChart() {
   // Candlestick trace
   const candlestick: Data = {
     x: timestamps,
-    open: props.klineData.map(d => d.open),
-    high: props.klineData.map(d => d.high),
-    low: props.klineData.map(d => d.low),
-    close: props.klineData.map(d => d.close),
+    open: displayData.map(d => d.open),
+    high: displayData.map(d => d.high),
+    low: displayData.map(d => d.low),
+    close: displayData.map(d => d.close),
     type: 'candlestick',
     name: 'K线',
     increasing: { line: { color: INDICATOR_COLORS.bullish } },
@@ -92,8 +96,8 @@ function renderChart() {
   traces.push(candlestick)
 
   // Entry/Exit markers with indicator values
-  const entryPoints = props.klineData.filter(d => d.is_entry)
-  const exitPoints = props.klineData.filter(d => d.is_exit)
+  const entryPoints = displayData.filter(d => d.is_entry)
+  const exitPoints = displayData.filter(d => d.is_exit)
 
   // Helper function to get indicator values at a specific index
   function getIndicatorText(index: number): string {
@@ -119,7 +123,7 @@ function renderChart() {
   // Entry points (开仓点) - 显示技术指标值
   if (entryPoints.length > 0) {
     const entryTexts = entryPoints.map(d => {
-      const idx = props.klineData.findIndex(k => k.datetime === d.datetime)
+      const idx = displayData.findIndex(k => k.datetime === d.datetime)
       const indicatorText = idx >= 0 ? getIndicatorText(idx) : ''
       const parts = [
         `<b>${d.position_type === 'long' ? '做多开仓' : '做空开仓'}</b>`,
@@ -155,7 +159,7 @@ function renderChart() {
   // Exit points (平仓点) - 显示技术指标值
   if (exitPoints.length > 0) {
     const exitTexts = exitPoints.map(d => {
-      const idx = props.klineData.findIndex(k => k.datetime === d.datetime)
+      const idx = displayData.findIndex(k => k.datetime === d.datetime)
       const indicatorText = idx >= 0 ? getIndicatorText(idx) : ''
       const parts = [
         `<b>平仓</b>`,
@@ -230,6 +234,13 @@ function renderChart() {
   const mainChartHeight = 0.50
   const subplotHeight = numSubplots > 0 ? (1 - mainChartHeight - timeLabelSpace - gap * numSubplots) / numSubplots : 0
 
+  // 找到第一个开仓点的位置
+  const firstEntryIndex = displayData.findIndex(d => d.is_entry)
+  const startIdx = firstEntryIndex >= 0
+    ? Math.max(0, firstEntryIndex - Math.floor(props.displayCount / 2))
+    : 0
+  const endIdx = Math.min(startIdx + props.displayCount - 1, timestamps.length - 1)
+
   const layout: Partial<Layout> = {
     title: {
       text: props.strategy && props.symbol
@@ -246,6 +257,8 @@ function renderChart() {
       tickfont: { size: 9 },
       nticks: 8,
       showticklabels: false, // 主图不显示时间标签
+      // 设置初始显示范围：以第一个开仓点为中心
+      range: [startIdx, endIdx],
     },
     yaxis: {
       domain: [1 - mainChartHeight, 1],

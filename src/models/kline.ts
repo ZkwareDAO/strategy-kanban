@@ -3,6 +3,11 @@
  */
 
 /**
+ * 时间周期类型
+ */
+export type TimeframeValue = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d'
+
+/**
  * K线数据点（分钟级）
  * @example
  * const kline: KlinePoint = {
