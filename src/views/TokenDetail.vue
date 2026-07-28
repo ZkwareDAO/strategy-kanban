@@ -1,0 +1,289 @@
+<template>
+  <div class="token-detail">
+    <!-- Back Button -->
+    <button class="back-btn" @click="$router.back()">← 返回总览</button>
+
+    <!-- Loading State -->
+    <div v-if="loading" class="loading">加载中...</div>
+
+    <!-- Error State -->
+    <div v-else-if="error" class="error">{{ error }}</div>
+
+    <!-- Detail Content -->
+    <template v-else>
+      <!-- Detail Header -->
+      <div class="detail-header">
+        <h2>{{ strategy }} / {{ symbol }}</h2>
+        <p>运行实例: {{ runtimeName }} | 日期: {{ formattedDate }}</p>
+        <el-tag :type="modeTagType">{{ modeLabel }}</el-tag>
+
+        <!-- Strategy Logic Inline -->
+        <div class="strategy-logic-inline">
+          <div class="logic-toggle" @click="logicExpanded = !logicExpanded">
+            <span class="logic-label">策略逻辑:</span>
+            <button class="btn-toggle-inline">{{ logicExpanded ? '[收起 ▲]' : '[展开 ▼]' }}</button>
+          </div>
+          <div v-show="logicExpanded" class="logic-content-inline">
+            <div class="logic-section-inline">
+              <div class="logic-title-inline">【开仓条件】</div>
+              <ul>
+                <li v-for="(rule, idx) in mockLogic.entry_conditions.rules" :key="idx">{{ rule }}</li>
+              </ul>
+            </div>
+            <div class="logic-section-inline">
+              <div class="logic-title-inline">【平仓条件】</div>
+              <ul>
+                <li v-for="(rule, idx) in mockLogic.exit_conditions.rules" :key="idx">{{ rule }}</li>
+              </ul>
+            </div>
+            <div class="logic-section-inline">
+              <div class="logic-title-inline">【风控】</div>
+              <ul>
+                <li v-for="(rule, idx) in mockLogic.risk_management.rules" :key="idx">{{ rule }}</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chart -->
+      <PriceRoiChart :timeline-data="klineData" />
+
+      <!-- Indicators -->
+      <IndicatorCard :indicators="mockIndicators" />
+
+      <!-- Comparison -->
+      <ComparisonReport :comparison="comparisonData" />
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import { getKline, getComparison } from '@/api/strategy'
+import PriceRoiChart from '@/components/detail/PriceRoiChart.vue'
+import IndicatorCard from '@/components/detail/IndicatorCard.vue'
+import ComparisonReport from '@/components/detail/ComparisonReport.vue'
+import type { StrategyLogic as StrategyLogicType, TechnicalIndicator, SignalComparison } from '@/models/detail'
+import type { KlinePoint } from '@/models/kline'
+
+const props = defineProps<{
+  strategy: string
+  symbol: string
+}>()
+
+const route = useRoute()
+const runtimeName = computed(() => (route.query.runtime as string) ?? '')
+const date = computed(() => (route.query.date as string) ?? '')
+
+const formattedDate = computed(() => {
+  if (!date.value) return ''
+  return `${date.value.slice(0, 4)}-${date.value.slice(4, 6)}-${date.value.slice(6, 8)}`
+})
+
+const tradingMode = computed(() => {
+  const name = runtimeName.value.toUpperCase()
+  if (name.includes('_LIVE') || name.endsWith('LIVE')) return 'live'
+  if (name.includes('_PAPER') || name.endsWith('PAPER')) return 'paper_trading'
+  if (name.includes('_SMOKING') || name.endsWith('SMOKING')) return 'smoking'
+  return ''
+})
+
+const modeLabel = computed(() => {
+  const map: Record<string, string> = {
+    live: '实盘',
+    paper_trading: '模拟盘',
+    smoking: '冒烟测试',
+  }
+  return map[tradingMode.value] ?? ''
+})
+
+const modeTagType = computed(() => {
+  const map: Record<string, string> = {
+    live: 'danger',
+    paper_trading: 'warning',
+    smoking: 'info',
+  }
+  return (map[tradingMode.value] ?? 'info') as 'danger' | 'warning' | 'info'
+})
+
+const logicExpanded = ref(false)
+const loading = ref(true)
+const error = ref<string | null>(null)
+const klineData = ref<KlinePoint[]>([])
+const comparisonData = ref<SignalComparison | undefined>(undefined)
+
+// Mock data for strategy logic and indicators (这些数据暂无API，保持mock)
+const mockLogic: StrategyLogicType = {
+  entry_conditions: {
+    title: '入场条件',
+    rules: ['RSI < 30 且 MACD 金叉', '价格突破布林带下轨', '成交量 > MA20 * 1.5'],
+  },
+  exit_conditions: {
+    title: '出场条件',
+    rules: ['RSI > 70 或 MACD 死叉', '止损: -3%', '止盈: +8%'],
+  },
+  risk_management: {
+    title: '风控规则',
+    rules: ['单笔最大仓位 10%', '最大持仓数 5', '日最大亏损 5%'],
+  },
+}
+
+const mockIndicators: TechnicalIndicator[] = [
+  { name: 'RSI(14)', value: '45.2', signal: '中性' },
+  { name: 'MACD', value: '-120.5', signal: '看空' },
+  { name: '布林带', value: '下轨附近', signal: '超卖' },
+  { name: 'MA20', value: '65,200', signal: '' },
+  { name: 'ATR', value: '1,250', signal: '' },
+  { name: '成交量', value: '2.3M', signal: '放量' },
+]
+
+async function fetchData() {
+  if (!runtimeName.value || !date.value) {
+    error.value = '缺少运行实例或日期参数'
+    loading.value = false
+    return
+  }
+
+  loading.value = true
+  error.value = null
+
+  try {
+    // 并行获取K线和对比数据
+    const [kline, comparison] = await Promise.all([
+      getKline(runtimeName.value, date.value).catch(() => []),
+      getComparison(props.strategy, props.symbol, date.value).catch(() => undefined),
+    ])
+
+    klineData.value = kline
+    comparisonData.value = comparison
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '加载失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(fetchData)
+</script>
+
+<style scoped lang="scss">
+.token-detail {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-bottom: 20px;
+  font-size: 14px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: #f9fafb;
+  }
+}
+
+.loading,
+.error {
+  text-align: center;
+  padding: 40px;
+  font-size: 16px;
+  color: #6b7280;
+}
+
+.error {
+  color: #ef4444;
+}
+
+.detail-header {
+  background: white;
+  padding: 20px 30px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  margin-bottom: 20px;
+
+  h2 {
+    margin: 0 0 10px 0;
+  }
+
+  p {
+    color: #6b7280;
+    margin: 0 0 15px 0;
+  }
+}
+
+.strategy-logic-inline {
+  margin-top: 15px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 15px;
+}
+
+.logic-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.logic-label {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.btn-toggle-inline {
+  background: none;
+  border: none;
+  color: #3b82f6;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.logic-content-inline {
+  margin-top: 15px;
+  padding: 15px;
+  background: #f9fafb;
+  border-radius: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.logic-section-inline {
+  margin-bottom: 12px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.logic-title-inline {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.logic-section-inline ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: #4b5563;
+
+  li {
+    margin-bottom: 3px;
+  }
+}
+</style>
