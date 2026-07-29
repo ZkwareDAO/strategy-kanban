@@ -38,6 +38,8 @@ export interface Runtime {
  * const summary: StrategySummary = {
  *   strategy: 'cta_ict_v4',
  *   position_count: 4,
+ *   completed_count: 2,
+ *   holding_count: 1,
  *   win_rate: 75.0,
  *   avg_roi: 2.35
  * }
@@ -45,8 +47,12 @@ export interface Runtime {
 export interface StrategySummary {
   /** 策略名称 */
   strategy: string
-  /** 持仓数 */
+  /** 总持仓数 */
   position_count: number
+  /** 已完成交易数（有平仓时间） */
+  completed_count: number
+  /** 未完成交易数（持仓中） */
+  holding_count: number
   /** 胜率 (%) */
   win_rate: number
   /** 平均ROI (%) */

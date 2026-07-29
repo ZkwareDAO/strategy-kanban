@@ -63,9 +63,15 @@ export const useStrategyStore = defineStore('strategy', {
         const winCount = positions.filter(p => p.realized_pnl > 0).length
         const winRate = positions.length > 0 ? (winCount / positions.length) * 100 : 0
 
+        // 计算已完成和未完成交易数
+        const completedCount = positions.filter(p => p.exit_time).length
+        const holdingCount = positions.filter(p => !p.exit_time).length
+
         summaries.push({
           strategy,
           position_count: positions.length,
+          completed_count: completedCount,
+          holding_count: holdingCount,
           win_rate: winRate,
           avg_roi: avgRoi,
         })

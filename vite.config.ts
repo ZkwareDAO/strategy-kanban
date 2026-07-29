@@ -22,6 +22,7 @@ export default defineConfig({
     }
   },
   server: {
+    host: true, // 允许局域网访问
     port: 3000,
     open: true
   }

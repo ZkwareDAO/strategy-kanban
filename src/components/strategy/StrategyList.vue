@@ -17,7 +17,9 @@
         <div class="strategy-row" @click="$emit('expand', summary.strategy)">
           <div class="strategy-name">{{ summary.strategy }}</div>
           <div class="metrics-group">
-            <span class="metric">{{ summary.position_count }}仓</span>
+            <span class="metric">已完成{{ summary.completed_count }}</span>
+            <span class="metric-sep">|</span>
+            <span class="metric">持仓中{{ summary.holding_count }}</span>
             <span class="metric-sep">|</span>
             <span class="metric">胜率{{ summary.win_rate.toFixed(0) }}%</span>
             <span class="metric-sep">|</span>

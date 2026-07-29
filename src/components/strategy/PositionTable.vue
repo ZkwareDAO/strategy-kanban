@@ -7,7 +7,6 @@
       <div>平仓点</div>
       <div>ROI</div>
       <div>入场价格</div>
-      <div>操作</div>
     </div>
 
     <!-- Rows -->
@@ -26,7 +25,7 @@
           {{ formatPnl(position.realized_pnl) }}
         </div>
         <div class="price">{{ formatPrice(position.entry_price) }}</div>
-        <button class="btn-view" @click="$emit('view', position)">查看</button>
+        <button class="btn-view" @click="$emit('view', position)">详情</button>
       </div>
     </div>
 
@@ -69,7 +68,7 @@ function formatPnl(value: number): string {
   background: #f3f4f6;
   padding: 12px 20px;
   display: grid;
-  grid-template-columns: 1.5fr 1fr 1fr 1fr 1.2fr 100px;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr 1.2fr 80px;
   gap: 15px;
   font-weight: 600;
   font-size: 13px;
@@ -79,7 +78,7 @@ function formatPnl(value: number): string {
 .position-row {
   padding: 15px 20px;
   display: grid;
-  grid-template-columns: 1.5fr 1fr 1fr 1fr 1.2fr 100px;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr 1.2fr 80px;
   gap: 15px;
   border-top: 1px solid #e5e7eb;
   align-items: center;
