@@ -14,6 +14,7 @@ import {
   INDICATOR_COLORS,
   STRATEGY_INDICATOR_CONFIG,
 } from '@/indicators'
+import type { BacktestSignal } from '@/models/backtest'
 
 interface Props {
   klineData: KlinePoint[]
@@ -21,6 +22,7 @@ interface Props {
   symbol?: string
   indicators?: IndicatorType[]
   displayCount?: number
+  backplaySignals?: BacktestSignal[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -36,7 +38,7 @@ onMounted(() => {
   renderChart()
 })
 
-watch([() => props.klineData, () => props.strategy, () => props.indicators, () => props.displayCount], () => {
+watch([() => props.klineData, () => props.strategy, () => props.indicators, () => props.displayCount, () => props.backplaySignals], () => {
   renderChart()
 }, { deep: true })
 
@@ -54,6 +56,31 @@ function renderChart() {
   const timestamps = displayData.map(d => d.datetime)
   const indicatorParams = getIndicatorParams(props.strategy)
   const indicators = createIndicators(props.indicators, indicatorParams)
+
+  // 将回放信号时间对齐到K线周期
+  const alignBackplayTime = (signalTime: string): string => {
+    // 从K线数据推断时间周期（比较前两根K线的时间差）
+    if (displayData.length < 2) return signalTime
+
+    const t1 = new Date(displayData[0].datetime).getTime()
+    const t2 = new Date(displayData[1].datetime).getTime()
+    const intervalMs = Math.abs(t2 - t1)
+
+    // 将信号时间对齐到周期起始时间
+    const signalTimestamp = new Date(signalTime).getTime()
+    const alignedTimestamp = Math.floor(signalTimestamp / intervalMs) * intervalMs
+
+    // 格式化为 "YYYY-MM-DD HH:MM:SS"
+    const alignedDate = new Date(alignedTimestamp)
+    const year = alignedDate.getFullYear()
+    const month = String(alignedDate.getMonth() + 1).padStart(2, '0')
+    const day = String(alignedDate.getDate()).padStart(2, '0')
+    const hour = String(alignedDate.getHours()).padStart(2, '0')
+    const minute = String(alignedDate.getMinutes()).padStart(2, '0')
+    const second = '00'
+
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+  }
 
   const traces: Data[] = []
 
@@ -77,7 +104,7 @@ function renderChart() {
   })
 
   // Candlestick trace
-  const candlestick: Data = {
+  const candlestick = {
     x: timestamps,
     open: displayData.map(d => d.open),
     high: displayData.map(d => d.high),
@@ -92,7 +119,7 @@ function renderChart() {
     showlegend: false,
     hovertext: candleHoverText,
     hoverinfo: 'text',
-  }
+  } as Data
   traces.push(candlestick)
 
   // Entry/Exit markers with indicator values
@@ -125,10 +152,12 @@ function renderChart() {
     const entryTexts = entryPoints.map(d => {
       const idx = displayData.findIndex(k => k.datetime === d.datetime)
       const indicatorText = idx >= 0 ? getIndicatorText(idx) : ''
+      // 使用 entry_time（精确时间）或 fallback 到 datetime
+      const timeDisplay = d.entry_time || d.datetime
       const parts = [
         `<b>${d.position_type === 'long' ? '做多开仓' : '做空开仓'}</b>`,
         `价格: ${d.entry_price!.toFixed(2)}`,
-        `时间: ${d.datetime}`,
+        `时间: ${timeDisplay}`,
       ]
       if (indicatorText) {
         parts.push('--- 技术指标 ---')
@@ -168,11 +197,13 @@ function renderChart() {
     const exitTexts = exitPoints.map(d => {
       const idx = displayData.findIndex(k => k.datetime === d.datetime)
       const indicatorText = idx >= 0 ? getIndicatorText(idx) : ''
+      // 使用 exit_time（精确时间）或 fallback 到 datetime
+      const timeDisplay = d.exit_time || d.datetime
       const parts = [
         `<b>平仓</b>`,
         `价格: ${d.close.toFixed(2)}`,
         `ROI: ${d.pnl_pct!.toFixed(2)}%`,
-        `时间: ${d.datetime}`,
+        `时间: ${timeDisplay}`,
       ]
       if (indicatorText) {
         parts.push('--- 技术指标 ---')
@@ -198,6 +229,65 @@ function renderChart() {
       xaxis: 'x',
       yaxis: 'y',
     } as Data)
+  }
+
+  // Backplay signals (回放信号) - 使用不同的标记样式区分实盘
+  if (props.backplaySignals && props.backplaySignals.length > 0) {
+    const backplayEntries = props.backplaySignals.filter(s => s.action === 'open')
+    const backplayExits = props.backplaySignals.filter(s => s.action === 'close')
+
+    // 回放开仓点 - 使用菱形标记
+    if (backplayEntries.length > 0) {
+      traces.push({
+        x: backplayEntries.map(s => alignBackplayTime(s.datetime)),
+        y: backplayEntries.map(s => s.price),
+        type: 'scatter',
+        mode: 'markers+text',
+        name: '回放开仓',
+        marker: {
+          symbol: 'diamond',
+          size: 12,
+          color: backplayEntries.map(s => s.position_type === 'long' ? '#3b82f6' : '#f97316'),
+          line: { width: 2, color: 'white' },
+        },
+        text: backplayEntries.map(s => s.position_type === 'long' ? 'B' : 'S'),
+        textposition: 'bottom center',
+        textfont: {
+          size: 12,
+          color: backplayEntries.map(s => s.position_type === 'long' ? '#3b82f6' : '#f97316'),
+          family: 'Arial Black',
+        },
+        hovertext: backplayEntries.map(s =>
+          `<b>回放${s.position_type === 'long' ? '做多' : '做空'}开仓</b><br>价格: ${s.price.toFixed(2)}<br>时间: ${s.datetime}`
+        ),
+        hoverinfo: 'text',
+        xaxis: 'x',
+        yaxis: 'y',
+      } as Data)
+    }
+
+    // 回放平仓点 - 使用正方形标记
+    if (backplayExits.length > 0) {
+      traces.push({
+        x: backplayExits.map(s => alignBackplayTime(s.datetime)),
+        y: backplayExits.map(s => s.price),
+        type: 'scatter',
+        mode: 'markers',
+        name: '回放平仓',
+        marker: {
+          symbol: 'square',
+          size: 10,
+          color: '#9333ea',
+          line: { width: 2, color: 'white' },
+        },
+        hovertext: backplayExits.map(s =>
+          `<b>回放平仓</b><br>价格: ${s.price.toFixed(2)}<br>时间: ${s.datetime}`
+        ),
+        hoverinfo: 'text',
+        xaxis: 'x',
+        yaxis: 'y',
+      } as Data)
+    }
   }
 
   // Collect subplot configs

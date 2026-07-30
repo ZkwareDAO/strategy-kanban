@@ -47,19 +47,34 @@
       </div>
 
       <!-- Chart Version Toggle -->
-      <div class="chart-version-toggle">
-        <button
-          :class="['version-btn', { active: chartVersion === 'v1' }]"
-          @click="chartVersion = 'v1'"
-        >
-          价格/ROI
-        </button>
-        <button
-          :class="['version-btn', { active: chartVersion === 'v2' }]"
-          @click="chartVersion = 'v2'"
-        >
-          技术指标
-        </button>
+      <div class="chart-controls">
+        <div class="chart-version-toggle">
+          <button
+            :class="['version-btn', { active: chartVersion === 'v1' }]"
+            @click="chartVersion = 'v1'"
+          >
+            价格/ROI
+          </button>
+          <button
+            :class="['version-btn', { active: chartVersion === 'v2' }]"
+            @click="chartVersion = 'v2'"
+          >
+            技术指标
+          </button>
+        </div>
+
+        <!-- 回放对比复选框 -->
+        <div class="backplay-toggle" v-if="chartVersion === 'v2'">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="showBackplay" />
+            <span>回放对比</span>
+          </label>
+          <span v-if="backplayLoading" class="backplay-status">加载中...</span>
+          <span v-else-if="backplayTrades.length === 0 && showBackplay" class="backplay-status">无回放数据</span>
+          <span v-else-if="backplayTrades.length > 0" class="backplay-status success">
+            {{ backplayTrades.length }} 条回放信号
+          </span>
+        </div>
       </div>
 
       <!-- Chart -->
@@ -81,6 +96,7 @@
           :symbol="symbol"
           :indicators="selectedIndicators"
           :display-count="displayCount"
+          :backplay-signals="showBackplay ? backplaySignals : undefined"
         />
       </template>
 
@@ -93,7 +109,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { getKline, getComparison } from '@/api/strategy'
+import { getKline, getComparison, getBacktestTrades } from '@/api/strategy'
 import { resampleKline, getDefaultDisplayCount } from '@/utils/resample'
 import PriceRoiChart from '@/components/detail/PriceRoiChart.vue'
 import TechnicalChart from '@/components/detail/TechnicalChart.vue'
@@ -103,6 +119,7 @@ import ComparisonReport from '@/components/detail/ComparisonReport.vue'
 import type { StrategyLogic as StrategyLogicType, SignalComparison } from '@/models/detail'
 import type { KlinePoint, TimeframeValue } from '@/models/kline'
 import type { IndicatorType } from '@/indicators'
+import type { BacktestSignal } from '@/models/backtest'
 
 const props = defineProps<{
   strategy: string
@@ -154,6 +171,11 @@ const chartVersion = ref<'v1' | 'v2'>('v2')
 const selectedTimeframe = ref<TimeframeValue>('1m')
 const displayCount = ref(100)
 
+// 回放对比相关状态
+const showBackplay = ref(false)
+const backplayLoading = ref(false)
+const backplayTrades = ref<BacktestSignal[]>([])
+
 // 重采样数据
 const processedKlineData = computed(() => {
   if (!klineData.value.length) return []
@@ -170,6 +192,9 @@ const dataWarning = computed(() => {
   }
   return null
 })
+
+// 回放信号
+const backplaySignals = computed(() => backplayTrades.value)
 
 // 监听时间周期变化，更新默认显示数量
 watch(selectedTimeframe, (tf) => {
@@ -217,6 +242,52 @@ async function fetchData() {
     loading.value = false
   }
 }
+
+// 加载回放数据
+async function fetchBackplayData() {
+  if (!date.value) return
+
+  backplayLoading.value = true
+  try {
+    // 只从 CSV 文件加载回放数据（包含正确的开仓和平仓信息）
+    const trades = await getBacktestTrades(date.value, props.strategy, props.symbol)
+
+    if (trades.length > 0) {
+      // 转换为信号点
+      const signals: BacktestSignal[] = []
+
+      for (const trade of trades) {
+        const isLong = trade.side === 'BUY' || trade.side === 'BUY_CLOSE'
+        const isOpen = trade.side === 'BUY' || trade.side === 'SELL'
+        const datetime = trade.timestamp.replace('T', ' ').substring(0, 19)
+
+        signals.push({
+          datetime,
+          price: trade.price,
+          position_type: isLong ? 'long' : 'short',
+          action: isOpen ? 'open' : 'close'
+        })
+      }
+
+      backplayTrades.value = signals
+    } else {
+      // CSV数据不存在，清空回放信号（不使用错误的comparison数据）
+      backplayTrades.value = []
+    }
+  } catch (err) {
+    console.error('Failed to load backplay data:', err)
+    backplayTrades.value = []
+  } finally {
+    backplayLoading.value = false
+  }
+}
+
+// 监听回放对比开关
+watch(showBackplay, (value) => {
+  if (value && backplayTrades.value.length === 0) {
+    fetchBackplayData()
+  }
+})
 
 onMounted(fetchData)
 </script>
@@ -344,6 +415,47 @@ onMounted(fetchData)
   display: flex;
   gap: 8px;
   margin-bottom: 16px;
+}
+
+.chart-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.backplay-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #374151;
+
+  input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+  }
+}
+
+.backplay-status {
+  padding: 4px 12px;
+  background: #f3f4f6;
+  color: #6b7280;
+  border-radius: 12px;
+  font-size: 12px;
+
+  &.success {
+    background: #dcfce7;
+    color: #166534;
+  }
 }
 
 .version-btn {

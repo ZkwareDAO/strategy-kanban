@@ -39,6 +39,9 @@ export function resampleKline(data: KlinePoint[], timeframe: TimeframeValue): Kl
         ...current,
         timestamp: periodStart,
         datetime: new Date(periodStart * 1000).toISOString().replace('T', ' ').substring(0, 19),
+        // 保留开平仓的精确时间（用于显示）
+        entry_time: current.is_entry ? current.datetime : undefined,
+        exit_time: current.is_exit ? current.datetime : undefined,
       })
     } else {
       // 更新现有周期K线
@@ -48,8 +51,14 @@ export function resampleKline(data: KlinePoint[], timeframe: TimeframeValue): Kl
       existing.close = current.close
 
       // 保持开平仓标记
-      if (current.is_entry) existing.is_entry = true
-      if (current.is_exit) existing.is_exit = true
+      if (current.is_entry) {
+        existing.is_entry = true
+        existing.entry_time = current.datetime // 保留精确时间
+      }
+      if (current.is_exit) {
+        existing.is_exit = true
+        existing.exit_time = current.datetime // 保留精确时间
+      }
 
       // 保持其他信息（取最后一个的值）
       if (current.position_id) existing.position_id = current.position_id

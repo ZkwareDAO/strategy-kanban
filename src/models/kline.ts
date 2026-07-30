@@ -45,4 +45,8 @@ export interface KlinePoint {
   is_entry: boolean
   /** 是否平仓点 */
   is_exit: boolean
+  /** 开仓精确时间（重采样后保留） */
+  entry_time?: string
+  /** 平仓精确时间（重采样后保留） */
+  exit_time?: string
 }
