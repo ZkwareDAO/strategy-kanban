@@ -1,13 +1,19 @@
 <template>
   <div class="indicator-panel">
-    <div class="panel-header">
-      <h3>技术指标</h3>
-      <button @click="toggleAll" class="toggle-btn">
-        {{ allSelected ? '清除全部' : '全选' }}
-      </button>
+    <div class="panel-header" @click="togglePanel">
+      <div class="header-left">
+        <span class="expand-icon">{{ expanded ? '▼' : '▶' }}</span>
+        <h3>技术指标选择</h3>
+      </div>
+      <div class="header-right">
+        <span class="selected-count">{{ selectedIndicators.length }} 项已选</span>
+        <button @click.stop="toggleAll" class="toggle-btn">
+          {{ allSelected ? '清除全部' : '全选' }}
+        </button>
+      </div>
     </div>
 
-    <div class="indicator-list">
+    <div v-show="expanded" class="indicator-list">
       <label
         v-for="indicator in availableIndicators"
         :key="indicator.type"
@@ -26,7 +32,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import type { IndicatorType } from '@/indicators'
 
 interface Props {
@@ -37,6 +43,8 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   'update:modelValue': [value: IndicatorType[]]
 }>()
+
+const expanded = ref(false)
 
 const availableIndicators = [
   { type: 'RSI' as IndicatorType, name: 'RSI', description: '相对强弱指数' },
@@ -50,6 +58,10 @@ const selectedIndicators = computed(() => props.modelValue)
 const allSelected = computed(() => {
   return availableIndicators.every(i => selectedIndicators.value.includes(i.type))
 })
+
+function togglePanel() {
+  expanded.value = !expanded.value
+}
 
 function toggleIndicator(type: IndicatorType) {
   const current = [...selectedIndicators.value]
@@ -73,64 +85,124 @@ function toggleAll() {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .indicator-panel {
-  padding: 1rem;
-  background: #f5f5f5;
-  border-radius: 4px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin-top: 1rem;
+  overflow: hidden;
+
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s;
+
+    &:hover {
+      background: #f9fafb;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+
+      .expand-icon {
+        font-size: 0.8rem;
+        color: #6b7280;
+        transition: transform 0.2s;
+      }
+
+      h3 {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 500;
+        color: #374151;
+      }
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+
+      .selected-count {
+        font-size: 0.85rem;
+        color: #6b7280;
+      }
+
+      .toggle-btn {
+        padding: 0.3rem 0.75rem;
+        font-size: 0.8rem;
+        background: #3b82f6;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background 0.2s;
+
+        &:hover {
+          background: #2563eb;
+        }
+      }
+    }
+  }
+
+  .indicator-list {
+    padding: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    border-top: 1px solid #e5e7eb;
+
+    .indicator-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+
+      &:hover {
+        background: #f3f4f6;
+        border-color: #d1d5db;
+      }
+
+      input {
+        cursor: pointer;
+      }
+
+      .indicator-name {
+        font-weight: 500;
+        color: #374151;
+      }
+
+      .indicator-desc {
+        color: #9ca3af;
+        font-size: 0.8rem;
+      }
+    }
+  }
 }
 
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.75rem;
+// 折叠动画
+.slide-enter-active,
+.slide-leave-active {
+  transition: all 0.3s ease;
+  max-height: 200px;
+  overflow: hidden;
 }
 
-.panel-header h3 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.toggle-btn {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  background: #2196f3;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.toggle-btn:hover {
-  background: #1976d2;
-}
-
-.indicator-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.indicator-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-}
-
-.indicator-item input {
-  cursor: pointer;
-}
-
-.indicator-name {
-  font-weight: 500;
-  min-width: 60px;
-}
-
-.indicator-desc {
-  color: #666;
-  font-size: 0.85rem;
+.slide-enter-from,
+.slide-leave-to {
+  max-height: 0;
+  opacity: 0;
 }
 </style>

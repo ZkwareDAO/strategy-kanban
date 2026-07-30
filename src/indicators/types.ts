@@ -19,6 +19,8 @@ export interface KlinePoint {
   pnl_pct?: number
   is_entry?: boolean
   is_exit?: boolean
+  entry_time?: string
+  exit_time?: string
 }
 
 /**

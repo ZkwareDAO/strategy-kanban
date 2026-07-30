@@ -46,25 +46,10 @@
         </div>
       </div>
 
-      <!-- Chart Version Toggle -->
+      <!-- Chart Controls -->
       <div class="chart-controls">
-        <div class="chart-version-toggle">
-          <button
-            :class="['version-btn', { active: chartVersion === 'v1' }]"
-            @click="chartVersion = 'v1'"
-          >
-            价格/ROI
-          </button>
-          <button
-            :class="['version-btn', { active: chartVersion === 'v2' }]"
-            @click="chartVersion = 'v2'"
-          >
-            技术指标
-          </button>
-        </div>
-
         <!-- 回放对比复选框 -->
-        <div class="backplay-toggle" v-if="chartVersion === 'v2'">
+        <div class="backplay-toggle">
           <label class="checkbox-label">
             <input type="checkbox" v-model="showBackplay" />
             <span>回放对比</span>
@@ -75,30 +60,47 @@
             {{ backplayTrades.length }} 条回放信号
           </span>
         </div>
+
+        <!-- Indicator Panel -->
+        <IndicatorPanel v-model="selectedIndicators" />
+      </div>
+
+      <!-- Timeframe Selector -->
+      <TimeframeSelector
+        v-model="selectedTimeframe"
+        v-model:display-count="displayCount"
+      />
+      <div v-if="dataWarning" class="data-warning">
+        ⚠️ {{ dataWarning }}
       </div>
 
       <!-- Chart -->
-      <PriceRoiChart v-if="chartVersion === 'v1'" :timeline-data="klineData" />
+      <TechnicalChart
+        :kline-data="processedKlineData"
+        :strategy="strategy"
+        :symbol="symbol"
+        :indicators="selectedIndicators"
+        :display-count="displayCount"
+        :backplay-signals="showBackplay ? backplaySignals : undefined"
+        @entry-click="handleEntryClick"
+      />
 
-      <!-- Technical Chart V2 -->
-      <template v-else>
-        <TimeframeSelector
-          v-model="selectedTimeframe"
-          v-model:display-count="displayCount"
-        />
-        <div v-if="dataWarning" class="data-warning">
-          ⚠️ {{ dataWarning }}
+      <!-- Entry Detail Dialog -->
+      <el-dialog
+        v-model="entryDialogVisible"
+        :title="entryDialogTitle"
+        width="90%"
+        top="5vh"
+        :fullscreen="false"
+      >
+        <div class="dialog-content">
+          <PriceRoiChart
+            v-if="entryDialogVisible"
+            :timeline-data="klineData"
+            :highlight-position-id="highlightPositionId"
+          />
         </div>
-        <IndicatorPanel v-model="selectedIndicators" />
-        <TechnicalChart
-          :kline-data="processedKlineData"
-          :strategy="strategy"
-          :symbol="symbol"
-          :indicators="selectedIndicators"
-          :display-count="displayCount"
-          :backplay-signals="showBackplay ? backplaySignals : undefined"
-        />
-      </template>
+      </el-dialog>
 
       <!-- Comparison -->
       <ComparisonReport :comparison="comparisonData" />
@@ -167,14 +169,34 @@ const error = ref<string | null>(null)
 const klineData = ref<KlinePoint[]>([])
 const comparisonData = ref<SignalComparison | undefined>(undefined)
 const selectedIndicators = ref<IndicatorType[]>(['RSI', 'MACD', 'ATR'])
-const chartVersion = ref<'v1' | 'v2'>('v2')
-const selectedTimeframe = ref<TimeframeValue>('1m')
+const selectedTimeframe = ref<TimeframeValue>('5m')
 const displayCount = ref(100)
 
 // 回放对比相关状态
 const showBackplay = ref(false)
 const backplayLoading = ref(false)
 const backplayTrades = ref<BacktestSignal[]>([])
+
+// 开仓点详情弹框
+const entryDialogVisible = ref(false)
+const entryDialogTitle = ref('')
+const highlightPositionId = ref('')
+
+// 处理开仓点点击
+function handleEntryClick(entry: { position_id: string; position_type: string; entry_price: number; datetime: string }) {
+  entryDialogTitle.value = `${entry.position_type === 'long' ? '做多' : '做空'}开仓 - $${entry.entry_price.toFixed(2)} - ${entry.datetime}`
+  highlightPositionId.value = entry.position_id
+  entryDialogVisible.value = true
+}
+
+// 监听弹框打开，触发窗口 resize 事件让 ECharts 重新计算尺寸
+watch(entryDialogVisible, (visible) => {
+  if (visible) {
+    setTimeout(() => {
+      window.dispatchEvent(new Event('resize'))
+    }, 200)
+  }
+})
 
 // 重采样数据
 const processedKlineData = computed(() => {
@@ -486,5 +508,10 @@ onMounted(fetchData)
   margin-bottom: 1rem;
   color: #92400e;
   font-size: 0.9rem;
+}
+
+.dialog-content {
+  max-height: 80vh;
+  overflow-y: auto;
 }
 </style>

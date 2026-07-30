@@ -32,6 +32,10 @@ const props = withDefaults(defineProps<Props>(), {
   displayCount: 100,
 })
 
+const emit = defineEmits<{
+  entryClick: [entry: { position_id: string; position_type: string; entry_price: number; datetime: string }]
+}>()
+
 const chartContainer = ref<HTMLDivElement>()
 
 onMounted(() => {
@@ -410,6 +414,30 @@ function renderChart() {
   }
 
   Plotly.newPlot(chartContainer.value, traces, layout, config)
+
+  // 添加点击事件监听
+  if (chartContainer.value) {
+    chartContainer.value.on('plotly_click', (eventData: { points: Array<{ curveNumber: number; pointNumber: number; x: string; y: number }> }) => {
+      const point = eventData.points[0]
+      if (!point) return
+
+      // 检查是否点击的是开仓点（curveNumber 对应 traces 中的开仓点 trace）
+      // 开仓点是第 1 个 trace（index 1），因为第 0 个是 candlestick
+      const entryPoints = displayData.filter(d => d.is_entry)
+      if (entryPoints.length === 0) return
+
+      // 找到对应的开仓点
+      const entryPoint = entryPoints.find(d => d.datetime === point.x)
+      if (entryPoint && entryPoint.entry_price) {
+        emit('entryClick', {
+          position_id: entryPoint.position_id ?? 'default',
+          position_type: entryPoint.position_type ?? 'long',
+          entry_price: entryPoint.entry_price,
+          datetime: entryPoint.entry_time || entryPoint.datetime
+        })
+      }
+    })
+  }
 }
 
 onBeforeUnmount(() => {

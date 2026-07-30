@@ -7,11 +7,44 @@ import type { SignalComparison } from '@/models/detail'
 import type { BacktestTrade, BacktestSignal } from '@/models/backtest'
 
 /**
- * 获取策略运行实例列表
+ * 获取仓位数据索引
+ * @param date 日期字符串
+ * @returns 有数据的 runtime 列表
+ */
+export async function getPositionsIndex(date: string): Promise<Runtime[]> {
+  try {
+    const response = await fetch(`/data/${date}/pnl/positions_index.json`)
+    if (!response.ok) {
+      // 索引文件不存在，返回空数组
+      return []
+    }
+
+    const data = await response.json()
+    return data.runtimes.map((r: { runtime_name: string; strategy: string; symbol: string; trading_mode: string }) => ({
+      runtime_name: r.runtime_name,
+      strategy: r.strategy,
+      symbol: r.symbol,
+      trading_mode: r.trading_mode as 'live' | 'paper_trading' | 'smoking',
+      status: 'success' as const,
+    }))
+  } catch (err) {
+    return []
+  }
+}
+
+/**
+ * 获取策略运行实例列表（优先使用索引文件）
  * @param date 日期字符串，如: '20260720'
  * @returns 运行实例数组
  */
 export async function getRuntimes(date: string): Promise<Runtime[]> {
+  // 优先从仓位索引文件获取（准确反映实际数据）
+  const positionsRuntimes = await getPositionsIndex(date)
+  if (positionsRuntimes.length > 0) {
+    return positionsRuntimes
+  }
+
+  // 回退到 manifest.yaml
   const response = await fetch(`/data/${date}/manifest.yaml`)
   const text = await response.text()
   const data = yamlLoad(text) as { tasks: Array<{ runtime_name: string; strategy: string; symbol: string; status: string }> }
@@ -26,15 +59,95 @@ export async function getRuntimes(date: string): Promise<Runtime[]> {
 }
 
 /**
+ * 扫描实际数据目录，获取有数据的 runtime 列表
+ * 通过尝试获取目录下的 CSV 文件来判断
+ * @param date 日期字符串
+ * @param manifestRuntimes manifest 中的 runtime 列表（可选）
+ * @returns runtime 名称数组
+ */
+export async function scanDataDirectories(date: string, manifestRuntimes?: Runtime[]): Promise<string[]> {
+  // 如果提供了 manifest，检查哪些有实际数据
+  if (manifestRuntimes && manifestRuntimes.length > 0) {
+    const checks = await Promise.all(
+      manifestRuntimes.map(async r => {
+        try {
+          const response = await fetch(`/data/${date}/pnl/kline/${r.runtime_name}/${date}_summary_table.csv`)
+          return response.ok ? r.runtime_name : null
+        } catch {
+          return null
+        }
+      })
+    )
+    return checks.filter((r): r is string => r !== null)
+  }
+
+  // 否则返回空数组（无法扫描目录）
+  return []
+}
+
+/**
+ * 从 runtime 名称解析策略信息
+ * @param runtime_name 运行实例名称，如 'ICT_1D_4_BTCUSDT_LIVE'
+ * @returns 策略名称和交易对
+ */
+export function parseRuntimeName(runtime_name: string): { strategy: string; symbol: string } {
+  // 格式: STRATEGY_TIMEFRAME_VERSION_SYMBOL_MODE
+  // 例如: ICT_1D_4_BTCUSDT_LIVE -> strategy: cta_ict_v4, symbol: BTCUSDT
+  // 例如: NEWDOLPHIN_4H_1_ZECUSDT_SMOKING -> strategy: new_dolphin, symbol: ZECUSDT
+
+  const parts = runtime_name.split('_')
+
+  // 策略名映射
+  const strategyMap: Record<string, string> = {
+    'ICT': 'cta_ict_v4',
+    'NEWDOLPHIN': 'new_dolphin',
+    'NEWOBV': 'new_obv',
+    'VWAPMOM': 'vwap_channel_momentum',
+    'DOLPHINV2': 'dolphin_trading_v2',
+    'OBVATR': 'obv_atr_v2',
+    'RBREAKER': 'rbreaker_v3',
+    'DOLPHIN': 'dolphin_trading_v2',
+  }
+
+  // 查找策略前缀
+  let strategyPrefix = parts[0]
+  for (const prefix of Object.keys(strategyMap)) {
+    if (runtime_name.startsWith(prefix + '_') || runtime_name.startsWith(prefix)) {
+      strategyPrefix = prefix
+      break
+    }
+  }
+
+  const strategy = strategyMap[strategyPrefix] || strategyPrefix.toLowerCase()
+
+  // SYMBOL 通常是倒数第二个或第三个部分（在 MODE 之前）
+  // 例如: ICT_1D_4_BTCUSDT_LIVE -> BTCUSDT
+  // 例如: NEWDOLPHIN_4H_1_ZECUSDT_SMOKING -> ZECUSDT
+  const symbolIndex = parts.length - 2 // MODE 在最后
+  const symbol = parts[symbolIndex] || parts[parts.length - 1].replace('USDT', '') + 'USDT'
+
+  return { strategy, symbol }
+}
+
+/**
  * 获取持仓数据
  * @param runtime_name 运行实例名称
  * @param date 日期字符串
- * @returns 持仓数组
+ * @returns 持仓数组，如果文件不存在则返回空数组
  */
 export async function getPositions(runtime_name: string, date: string): Promise<Position[]> {
-  const response = await fetch(`/data/${date}/pnl/kline/${runtime_name}/${date}_summary_table.csv`)
-  const text = await response.text()
-  return parsePositionSummary(text)
+  try {
+    const response = await fetch(`/data/${date}/pnl/kline/${runtime_name}/${date}_summary_table.csv`)
+    if (!response.ok) {
+      // 文件不存在，返回空数组
+      return []
+    }
+    const text = await response.text()
+    return parsePositionSummary(text)
+  } catch (err) {
+    // 请求失败，返回空数组
+    return []
+  }
 }
 
 /**

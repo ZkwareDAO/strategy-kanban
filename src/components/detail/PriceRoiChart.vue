@@ -14,6 +14,7 @@ import type { KlinePoint } from '@/models/kline'
 
 const props = defineProps<{
   timelineData?: KlinePoint[]
+  highlightPositionId?: string
 }>()
 
 const chartRef = ref<HTMLElement>()
@@ -121,8 +122,9 @@ function initChart() {
 
   positions.forEach((pos, idx) => {
     const color = ROI_COLORS[idx % ROI_COLORS.length]
+    const isHighlighted = props.highlightPositionId && pos.id === props.highlightPositionId
 
-    // 开仓/平仓标注点（放在 ROI 线上，用 ROI 坐标）
+    // 开仓/平仓标注点
     const markPoints: Record<string, unknown>[] = []
 
     if (pos.entryIndex !== null) {
@@ -135,10 +137,16 @@ function initChart() {
         itemStyle: { color: pos.type === 'long' ? '#10B981' : '#EF4444' },
         label: {
           show: true,
-          formatter: `${pos.type === 'long' ? '开多' : '开空'} $${pos.entryPrice.toFixed(2)}`,
+          formatter: isHighlighted
+            ? `本次${pos.type === 'long' ? '开多' : '开空'} $${pos.entryPrice.toFixed(2)}`
+            : `${pos.type === 'long' ? '开多' : '开空'} $${pos.entryPrice.toFixed(2)}`,
           position: 'top',
-          fontSize: 10,
-          color: pos.type === 'long' ? '#10B981' : '#EF4444',
+          fontSize: 11,
+          fontWeight: 'bold',
+          color: '#ffffff',
+          backgroundColor: pos.type === 'long' ? '#10B981' : '#EF4444',
+          padding: [4, 8],
+          borderRadius: 4,
         },
       })
     }
@@ -156,18 +164,20 @@ function initChart() {
           show: true,
           formatter: `平仓 ${exitRoi >= 0 ? '+' : ''}${exitRoi.toFixed(2)}%`,
           position: 'bottom',
-          fontSize: 10,
-          color: '#6B7280',
+          fontSize: 11,
+          fontWeight: 'bold',
+          color: '#ffffff',
+          backgroundColor: '#374151',
+          padding: [4, 8],
+          borderRadius: 4,
         },
       })
     }
 
-    // ROI 实线：从第一个有数据点到平仓点（或末尾）
-    // 如果有开仓点，从开仓点开始；否则从第一个 ROI 数据点开始
-    const solidEnd = pos.exitIndex !== null ? pos.exitIndex : times.length - 1
+    // ROI 实线部分
+    const exitIdx = pos.exitIndex
     const roiSolid: (number | null)[] = new Array(times.length).fill(null)
 
-    // 找到第一个有 ROI 数据的点
     let solidStart = pos.entryIndex
     if (solidStart === null) {
       for (let i = 0; i < times.length; i++) {
@@ -179,18 +189,10 @@ function initChart() {
     }
 
     if (solidStart !== null) {
+      const solidEnd = exitIdx !== null ? exitIdx : times.length - 1
       for (let i = solidStart; i <= solidEnd; i++) {
         const val = pos.roiMap.get(i)
         roiSolid[i] = val !== undefined ? val : null
-      }
-    }
-
-    // ROI 虚线：平仓点之后
-    const roiDashed: (number | null)[] = new Array(times.length).fill(null)
-    if (pos.exitIndex !== null) {
-      roiDashed[pos.exitIndex] = pos.roiMap.get(pos.exitIndex) ?? null
-      for (let i = pos.exitIndex + 1; i < times.length; i++) {
-        roiDashed[i] = pos.roiMap.get(i) ?? null
       }
     }
 
@@ -210,10 +212,16 @@ function initChart() {
       },
     })
 
-    // ROI 虚线
-    if (pos.exitIndex !== null) {
+    // ROI 虚线部分（平仓后）- 保存引用用于后续控制
+    if (exitIdx !== null) {
+      const roiDashed: (number | null)[] = new Array(times.length).fill(null)
+      roiDashed[exitIdx] = pos.roiMap.get(exitIdx) ?? null
+      for (let i = exitIdx + 1; i < times.length; i++) {
+        roiDashed[i] = pos.roiMap.get(i) ?? null
+      }
+
       series.push({
-        name: `${pos.label}(平仓后)`,
+        name: `${pos.label}_dashed`,
         type: 'line',
         yAxisIndex: 1,
         data: roiDashed,
@@ -225,7 +233,21 @@ function initChart() {
     }
   })
 
+  // 图例数据
   const legendData = ['价格', ...positions.map(p => p.label)]
+
+  // 保存虚线数据引用，用于图例控制
+  const dashedDataMap = new Map<string, (number | null)[]>()
+  positions.forEach(pos => {
+    if (pos.exitIndex !== null) {
+      const roiDashed: (number | null)[] = new Array(times.length).fill(null)
+      roiDashed[pos.exitIndex] = pos.roiMap.get(pos.exitIndex) ?? null
+      for (let i = pos.exitIndex + 1; i < times.length; i++) {
+        roiDashed[i] = pos.roiMap.get(i) ?? null
+      }
+      dashedDataMap.set(pos.label, roiDashed)
+    }
+  })
 
   const option = {
     tooltip: {
@@ -253,6 +275,7 @@ function initChart() {
     legend: {
       data: legendData,
       top: 0,
+      // 点击图例时，通过 legendselectchanged 事件处理
     },
     grid: {
       left: '3%',
@@ -289,6 +312,25 @@ function initChart() {
   }
 
   chartInstance.setOption(option)
+
+  // 监听图例选择变化，同步切换对应的虚线
+  chartInstance.on('legendselectchanged', (params: { name: string; selected: Record<string, boolean> }) => {
+    const clickedLabel = params.name
+
+    // 如果点击的是 ROI 曲线（不是"价格"），同时切换对应的虚线
+    if (clickedLabel !== '价格' && dashedDataMap.has(clickedLabel)) {
+      const isSelected = params.selected[clickedLabel]
+      const dashedName = `${clickedLabel}_dashed`
+
+      // 通过更新 data 来控制显示/隐藏
+      chartInstance.setOption({
+        series: [{
+          name: dashedName,
+          data: isSelected ? dashedDataMap.get(clickedLabel) : []
+        }]
+      })
+    }
+  })
 }
 
 function resizeChart() {
@@ -296,7 +338,10 @@ function resizeChart() {
 }
 
 onMounted(() => {
-  initChart()
+  // 延迟初始化，确保容器尺寸正确
+  setTimeout(() => {
+    initChart()
+  }, 100)
   window.addEventListener('resize', resizeChart)
 })
 
@@ -330,6 +375,6 @@ watch(() => props.timelineData, () => {
 
 .chart-container {
   width: 100%;
-  height: 400px;
+  height: 600px;
 }
 </style>

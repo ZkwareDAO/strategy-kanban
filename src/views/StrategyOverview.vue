@@ -16,116 +16,44 @@
       </div>
     </div>
 
-    <!-- Mode Selector -->
-    <mode-selector
-      :model-value="selectedMode"
-      :counts="strategyStore.modeCounts"
-      @update:model-value="handleModeChange"
-    />
-
     <!-- Strategy List -->
+    <div v-if="strategyStore.loading" class="loading">加载中...</div>
     <strategy-list
+      v-else
       :summaries="strategyStore.strategySummaries"
-      :expanded-strategy="expandedStrategy ?? undefined"
-      @expand="handleExpand"
-    >
-      <template #default>
-        <position-table
-          v-if="positionsForStrategy.length > 0"
-          :positions="positionsForStrategy"
-          :show-symbol="true"
-          :symbols="symbolsForStrategy"
-          @view="handleViewPosition"
-        />
-      </template>
-    </strategy-list>
+      :runtimes="strategyStore.runtimes"
+      :positions="strategyStore.positions"
+      @view-position="handleViewPosition"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useStrategyStore } from '@/stores/strategy'
 import { useAppStore } from '@/stores/app'
-import ModeSelector from '@/components/strategy/ModeSelector.vue'
 import StrategyList from '@/components/strategy/StrategyList.vue'
-import PositionTable from '@/components/strategy/PositionTable.vue'
-import type { Position } from '@/models/position'
 
 const router = useRouter()
 const strategyStore = useStrategyStore()
 const appStore = useAppStore()
 
 const selectedDate = ref('')
-const selectedMode = ref<'live' | 'paper_trading' | 'smoking'>('live')
-const expandedStrategy = ref<string | null>(null)
-
-// 同步 selectedMode 到 store，使 filteredRuntimes 生效
-function handleModeChange(mode: 'live' | 'paper_trading' | 'smoking') {
-  selectedMode.value = mode
-  strategyStore.setMode(mode)
-  expandedStrategy.value = null
-}
-
-const positionsForStrategy = computed((): Position[] => {
-  if (!expandedStrategy.value) return []
-  const runtimes = strategyStore.filteredRuntimes.filter(r => r.strategy === expandedStrategy.value)
-  const allPositions: Position[] = []
-  for (const runtime of runtimes) {
-    const positions = strategyStore.positions[runtime.runtime_name]
-    if (positions && positions.length > 0) {
-      allPositions.push(...positions)
-    }
-  }
-  return allPositions
-})
-
-const symbolsForStrategy = computed((): string[] => {
-  if (!expandedStrategy.value) return []
-  const runtimes = strategyStore.filteredRuntimes.filter(r => r.strategy === expandedStrategy.value)
-  const symbols: string[] = []
-  for (const runtime of runtimes) {
-    const positions = strategyStore.positions[runtime.runtime_name]
-    if (positions && positions.length > 0) {
-      for (const _ of positions) {
-        symbols.push(runtime.symbol)
-      }
-    }
-  }
-  return symbols
-})
 
 async function handleDateChange(date: string) {
   appStore.setDate(date)
   await strategyStore.fetchRuntimes(date)
-  expandedStrategy.value = null
 }
 
-async function handleExpand(strategy: string) {
-  if (expandedStrategy.value === strategy) {
-    expandedStrategy.value = null
-    return
-  }
-
-  expandedStrategy.value = strategy
-  const runtimes = strategyStore.filteredRuntimes.filter(r => r.strategy === strategy)
-  for (const runtime of runtimes) {
-    if (!strategyStore.fetchedRuntimes.has(runtime.runtime_name)) {
-      await strategyStore.fetchPositions(runtime.runtime_name, appStore.date)
-    }
-  }
-}
-
-function handleViewPosition(position: Position) {
-  const runtime = strategyStore.filteredRuntimes.find(r =>
-    strategyStore.positions[r.runtime_name]?.some(p => p.position_id === position.position_id)
-  )
+function handleViewPosition(runtimeName: string, symbol: string) {
+  const runtime = strategyStore.runtimes.find(r => r.runtime_name === runtimeName)
   if (runtime) {
     router.push({
       name: 'TokenDetail',
       params: {
         strategy: runtime.strategy,
-        symbol: runtime.symbol,
+        symbol: symbol,
       },
       query: {
         runtime: runtime.runtime_name,
@@ -136,7 +64,10 @@ function handleViewPosition(position: Position) {
 }
 
 onMounted(async () => {
-  const defaultDate = '20260720'
+  // 默认选择昨天的日期
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  const defaultDate = yesterday.toISOString().slice(0, 10).replace(/-/g, '')
   selectedDate.value = defaultDate
   await handleDateChange(defaultDate)
 })
@@ -179,5 +110,12 @@ onMounted(async () => {
     font-size: 14px;
     color: #6b7280;
   }
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  font-size: 16px;
+  color: #6b7280;
 }
 </style>

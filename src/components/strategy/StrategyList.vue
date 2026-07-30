@@ -2,42 +2,34 @@
   <div class="strategy-list">
     <!-- Header -->
     <div class="strategy-header">
-      <div>策略名称</div>
-      <div class="metrics-group">统计数据</div>
-      <div>操作</div>
+      <div class="col-name">策略名称</div>
+      <div class="col-tokens">代币</div>
+      <div class="col-mode">模式</div>
     </div>
 
-    <!-- Strategy Items -->
+    <!-- Strategy Rows -->
     <div v-if="summaries.length > 0">
       <div
         v-for="summary in summaries"
         :key="summary.strategy"
-        class="strategy-item"
+        class="strategy-row"
       >
-        <div class="strategy-row" @click="$emit('expand', summary.strategy)">
-          <div class="strategy-name">{{ summary.strategy }}</div>
-          <div class="metrics-group">
-            <span class="metric">已完成{{ summary.completed_count }}</span>
-            <span class="metric-sep">|</span>
-            <span class="metric">持仓中{{ summary.holding_count }}</span>
-            <span class="metric-sep">|</span>
-            <span class="metric">胜率{{ summary.win_rate.toFixed(0) }}%</span>
-            <span class="metric-sep">|</span>
-            <span class="metric" :class="summary.avg_roi >= 0 ? 'roi-positive' : 'roi-negative'">
-              平均ROI {{ formatRoi(summary.avg_roi) }}
-            </span>
-          </div>
-          <button class="btn-expand">
-            {{ expandedStrategy === summary.strategy ? '收起' : '展开' }}
-          </button>
+        <div class="col-name">{{ summary.strategy }}</div>
+        <div class="col-tokens">
+          <token-display
+            :tokens="getTokenInfoForStrategy(summary.strategy)"
+            @click="(token) => $emit('view-position', getRuntimeName(summary.strategy, token), token)"
+          />
         </div>
-
-        <!-- Position Details (slot for PositionTable) -->
-        <div
-          v-if="expandedStrategy === summary.strategy"
-          class="position-details"
-        >
-          <slot :strategy="summary.strategy"></slot>
+        <div class="col-mode">
+          <span
+            v-for="mode in getModesForStrategy(summary.strategy)"
+            :key="mode"
+            class="mode-tag"
+            :class="`mode-${mode}`"
+          >
+            {{ formatMode(mode) }}
+          </span>
         </div>
       </div>
     </div>
@@ -47,20 +39,68 @@
 </template>
 
 <script setup lang="ts">
-import type { StrategySummary } from '@/models/runtime'
+import type { StrategySummary, Runtime, TradingMode } from '@/models/runtime'
+import type { Position } from '@/models/position'
+import TokenDisplay from './TokenDisplay.vue'
 
-defineProps<{
+const props = defineProps<{
   summaries: StrategySummary[]
-  expandedStrategy?: string
+  runtimes: Runtime[]
+  positions: Record<string, Position[]>
 }>()
 
 defineEmits<{
-  expand: [strategy: string]
+  'view-position': [runtimeName: string, symbol: string]
 }>()
 
-function formatRoi(value: number): string {
-  const prefix = value >= 0 ? '+' : ''
-  return `${prefix}${value.toFixed(2)}%`
+// 获取策略对应的所有代币及其交易模式
+function getTokenInfoForStrategy(strategy: string): { token: string; mode: TradingMode }[] {
+  const strategyRuntimes = props.runtimes.filter(r => r.strategy === strategy)
+  const tokenMap = new Map<string, TradingMode>()
+
+  for (const runtime of strategyRuntimes) {
+    const positions = props.positions[runtime.runtime_name]
+    if (positions && positions.length > 0) {
+      tokenMap.set(runtime.symbol, runtime.trading_mode)
+    }
+  }
+
+  return Array.from(tokenMap.entries())
+    .map(([token, mode]) => ({ token, mode }))
+    .sort((a, b) => a.token.localeCompare(b.token))
+}
+
+// 获取策略对应的所有模式
+function getModesForStrategy(strategy: string): TradingMode[] {
+  const strategyRuntimes = props.runtimes.filter(r => r.strategy === strategy)
+  const modes = new Set<TradingMode>()
+
+  for (const runtime of strategyRuntimes) {
+    const positions = props.positions[runtime.runtime_name]
+    if (positions && positions.length > 0) {
+      modes.add(runtime.trading_mode)
+    }
+  }
+
+  return Array.from(modes)
+}
+
+// 获取运行实例名称
+function getRuntimeName(strategy: string, symbol: string): string {
+  const runtime = props.runtimes.find(r =>
+    r.strategy === strategy && r.symbol === symbol
+  )
+  return runtime?.runtime_name ?? ''
+}
+
+// 格式化模式显示
+function formatMode(mode: TradingMode): string {
+  const modeMap: Record<TradingMode, string> = {
+    live: 'Live',
+    paper_trading: 'Paper',
+    smoking: 'Smoking'
+  }
+  return modeMap[mode]
 }
 </script>
 
@@ -78,83 +118,67 @@ function formatRoi(value: number): string {
   border-bottom: 1px solid #e5e7eb;
   font-weight: 600;
   display: grid;
-  grid-template-columns: 1fr 2fr 100px;
+  grid-template-columns: 1fr 2fr 1fr;
   gap: 20px;
   font-size: 14px;
   color: #6b7280;
 }
 
-.strategy-item {
+.strategy-row {
+  padding: 20px;
+  display: grid;
+  grid-template-columns: 1fr 2fr 1fr;
+  gap: 20px;
+  align-items: center;
   border-bottom: 1px solid #e5e7eb;
+  transition: background 0.2s;
 
   &:last-child {
     border-bottom: none;
   }
-}
-
-.strategy-row {
-  padding: 20px;
-  display: grid;
-  grid-template-columns: 1fr 2fr 100px;
-  gap: 20px;
-  align-items: center;
-  cursor: pointer;
-  transition: background 0.2s;
 
   &:hover {
     background: #f9fafb;
   }
 }
 
-.strategy-name {
+.col-name {
   font-weight: 600;
   font-size: 15px;
 }
 
-.metrics-group {
+.col-tokens {
   display: flex;
   align-items: center;
+}
+
+.col-mode {
+  display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
-.metric {
-  font-size: 14px;
-  color: #4b5563;
-}
-
-.metric-sep {
-  color: #d1d5db;
-}
-
-.roi-positive {
-  color: #10b981;
+.mode-tag {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
   font-weight: 600;
 }
 
-.roi-negative {
-  color: #ef4444;
-  font-weight: 600;
+.mode-live {
+  background: #fee2e2;
+  color: #dc2626;
 }
 
-.btn-expand {
-  padding: 6px 12px;
-  background: #3b82f6;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  transition: background 0.2s;
-
-  &:hover {
-    background: #2563eb;
-  }
+.mode-paper_trading {
+  background: #fef3c7;
+  color: #d97706;
 }
 
-.position-details {
-  background: #f9fafb;
-  padding: 20px;
-  border-top: 1px solid #e5e7eb;
+.mode-smoking {
+  background: #e0e7ff;
+  color: #4f46e5;
 }
 
 .empty-state {

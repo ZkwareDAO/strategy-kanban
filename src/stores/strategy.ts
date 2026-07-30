@@ -8,7 +8,7 @@ export const useStrategyStore = defineStore('strategy', {
     runtimes: [] as Runtime[],
     positions: {} as Record<string, Position[]>,
     fetchedRuntimes: new Set<string>(), // 记录已尝试 fetch 的 runtime
-    selectedMode: 'live' as 'live' | 'paper_trading' | 'smoking' | '',
+    selectedMode: '' as 'live' | 'paper_trading' | 'smoking' | '', // 默认显示所有模式
     loading: false,
     error: null as string | null,
   }),
@@ -41,7 +41,7 @@ export const useStrategyStore = defineStore('strategy', {
       }
 
       // Collect positions for each strategy
-      for (const [, data] of strategyMap) {
+      for (const [strategy, data] of strategyMap) {
         for (const runtime of data.runtimes) {
           const positions = this.positions[runtime.runtime_name]
           if (positions && positions.length > 0) {
@@ -50,10 +50,12 @@ export const useStrategyStore = defineStore('strategy', {
         }
       }
 
-      // Compute summaries
+      // Compute summaries - 只返回有持仓的策略
       const summaries: StrategySummary[] = []
       for (const [strategy, data] of strategyMap) {
         const positions = data.positions
+        if (positions.length === 0) continue // 过滤掉没有持仓的策略
+
         const avgRoi =
           positions.length > 0
             ? positions.reduce((sum, p) => sum + p.realized_pnl, 0) / positions.length
@@ -86,12 +88,16 @@ export const useStrategyStore = defineStore('strategy', {
       this.loading = true
       this.error = null
       try {
-        this.runtimes = await getRuntimes(date)
+        // 获取运行实例列表（优先从索引文件）
+        const runtimes = await getRuntimes(date)
+
+        this.runtimes = runtimes
         this.positions = {}
         this.fetchedRuntimes = new Set<string>()
-        // 自动加载所有 runtime 的仓位数据
+
+        // 加载持仓数据
         await Promise.all(
-          this.runtimes.map(r => this.fetchPositions(r.runtime_name, date))
+          runtimes.map(r => this.fetchPositions(r.runtime_name, date))
         )
       } catch (err) {
         this.error = err instanceof Error ? err.message : 'Unknown error'
@@ -119,3 +125,12 @@ export const useStrategyStore = defineStore('strategy', {
     },
   },
 })
+
+/**
+ * 从运行实例名称中提取交易模式
+ */
+function extractMode(runtime_name: string): 'live' | 'paper_trading' | 'smoking' {
+  if (runtime_name.includes('_LIVE')) return 'live'
+  if (runtime_name.includes('_PAPER')) return 'paper_trading'
+  return 'smoking'
+}
