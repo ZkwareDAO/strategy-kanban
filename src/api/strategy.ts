@@ -1,6 +1,7 @@
 import { load as yamlLoad } from 'js-yaml'
 import { parsePositionSummary, parseKline } from '@/utils/csv'
 import type { Runtime } from '@/models/runtime'
+import { mapRuntimeName, extractDisplayPrefix, PREFIX_STRATEGY_MAP } from '@/models/runtime'
 import type { Position } from '@/models/position'
 import type { KlinePoint } from '@/models/kline'
 import type { SignalComparison } from '@/models/detail'
@@ -15,7 +16,6 @@ export async function getPositionsIndex(date: string): Promise<Runtime[]> {
   try {
     const response = await fetch(`/data/${date}/pnl/positions_index.json`)
     if (!response.ok) {
-      // 索引文件不存在，返回空数组
       return []
     }
 
@@ -26,6 +26,8 @@ export async function getPositionsIndex(date: string): Promise<Runtime[]> {
       symbol: r.symbol,
       trading_mode: r.trading_mode as 'live' | 'paper_trading' | 'smoking',
       status: 'success' as const,
+      display_name: extractDisplayPrefix(r.runtime_name),
+      has_data: true,
     }))
   } catch (err) {
     return []
@@ -33,29 +35,67 @@ export async function getPositionsIndex(date: string): Promise<Runtime[]> {
 }
 
 /**
- * 获取策略运行实例列表（优先使用索引文件）
+ * 获取策略运行实例列表
+ * 合并 manifest（所有策略）和 positions_index（有仓位的策略）
+ * manifest 中的 runtime_name 会通过映射转换为实际目录名
  * @param date 日期字符串，如: '20260720'
  * @returns 运行实例数组
  */
 export async function getRuntimes(date: string): Promise<Runtime[]> {
-  // 优先从仓位索引文件获取（准确反映实际数据）
-  const positionsRuntimes = await getPositionsIndex(date)
-  if (positionsRuntimes.length > 0) {
-    return positionsRuntimes
+  // 并行获取 manifest 和 positions_index
+  const [manifestRuntimes, positionsRuntimes] = await Promise.all([
+    getManifestRuntimes(date),
+    getPositionsIndex(date),
+  ])
+
+  // 用映射后的 runtime_name 去重合并
+  const seen = new Set<string>()
+  const merged: Runtime[] = []
+
+  // 先加入有仓位的数据（优先）
+  for (const r of positionsRuntimes) {
+    if (!seen.has(r.runtime_name)) {
+      seen.add(r.runtime_name)
+      merged.push(r)
+    }
   }
 
-  // 回退到 manifest.yaml
-  const response = await fetch(`/data/${date}/manifest.yaml`)
-  const text = await response.text()
-  const data = yamlLoad(text) as { tasks: Array<{ runtime_name: string; strategy: string; symbol: string; status: string }> }
+  // 再加入 manifest 中的（无仓位的策略）
+  for (const r of manifestRuntimes) {
+    if (!seen.has(r.runtime_name)) {
+      seen.add(r.runtime_name)
+      merged.push(r)
+    }
+  }
 
-  return data.tasks.map((task) => ({
-    runtime_name: task.runtime_name,
-    strategy: task.strategy,
-    symbol: task.symbol,
-    trading_mode: extractMode(task.runtime_name),
-    status: task.status as 'success' | 'failed',
-  }))
+  return merged
+}
+
+/**
+ * 从 manifest.yaml 获取所有 runtime，并映射 runtime_name
+ */
+async function getManifestRuntimes(date: string): Promise<Runtime[]> {
+  try {
+    const response = await fetch(`/data/${date}/manifest.yaml`)
+    if (!response.ok) return []
+    const text = await response.text()
+    const data = yamlLoad(text) as { tasks: Array<{ runtime_name: string; strategy: string; symbol: string; status: string }> }
+
+    return data.tasks.map((task) => {
+      const mappedName = mapRuntimeName(task.runtime_name)
+      return {
+        runtime_name: mappedName,
+        strategy: task.strategy,
+        symbol: task.symbol,
+        trading_mode: extractMode(mappedName),
+        status: task.status as 'success' | 'failed',
+        display_name: extractDisplayPrefix(mappedName),
+        has_data: false,
+      }
+    })
+  } catch {
+    return []
+  }
 }
 
 /**
@@ -97,33 +137,19 @@ export function parseRuntimeName(runtime_name: string): { strategy: string; symb
 
   const parts = runtime_name.split('_')
 
-  // 策略名映射
-  const strategyMap: Record<string, string> = {
-    'ICT': 'cta_ict_v4',
-    'NEWDOLPHIN': 'new_dolphin',
-    'NEWOBV': 'new_obv',
-    'VWAPMOM': 'vwap_channel_momentum',
-    'DOLPHINV2': 'dolphin_trading_v2',
-    'OBVATR': 'obv_atr_v2',
-    'RBREAKER': 'rbreaker_v3',
-    'DOLPHIN': 'dolphin_trading_v2',
-  }
-
-  // 查找策略前缀
+  // 查找策略前缀（使用统一的映射表）
   let strategyPrefix = parts[0]
-  for (const prefix of Object.keys(strategyMap)) {
+  for (const prefix of Object.keys(PREFIX_STRATEGY_MAP)) {
     if (runtime_name.startsWith(prefix + '_') || runtime_name.startsWith(prefix)) {
       strategyPrefix = prefix
       break
     }
   }
 
-  const strategy = strategyMap[strategyPrefix] || strategyPrefix.toLowerCase()
+  const strategy = PREFIX_STRATEGY_MAP[strategyPrefix] || strategyPrefix.toLowerCase()
 
-  // SYMBOL 通常是倒数第二个或第三个部分（在 MODE 之前）
-  // 例如: ICT_1D_4_BTCUSDT_LIVE -> BTCUSDT
-  // 例如: NEWDOLPHIN_4H_1_ZECUSDT_SMOKING -> ZECUSDT
-  const symbolIndex = parts.length - 2 // MODE 在最后
+  // SYMBOL 通常是倒数第二个部分（在 MODE 之前）
+  const symbolIndex = parts.length - 2
   const symbol = parts[symbolIndex] || parts[parts.length - 1].replace('USDT', '') + 'USDT'
 
   return { strategy, symbol }

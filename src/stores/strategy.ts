@@ -50,11 +50,11 @@ export const useStrategyStore = defineStore('strategy', {
         }
       }
 
-      // Compute summaries - 只返回有持仓的策略
+      // Compute summaries - 包含所有策略（包括无仓位的）
       const summaries: StrategySummary[] = []
       for (const [strategy, data] of strategyMap) {
         const positions = data.positions
-        if (positions.length === 0) continue // 过滤掉没有持仓的策略
+        const displayName = data.runtimes[0]?.display_name || strategy
 
         const avgRoi =
           positions.length > 0
@@ -71,6 +71,7 @@ export const useStrategyStore = defineStore('strategy', {
 
         summaries.push({
           strategy,
+          display_name: displayName,
           position_count: positions.length,
           completed_count: completedCount,
           holding_count: holdingCount,
@@ -88,16 +89,17 @@ export const useStrategyStore = defineStore('strategy', {
       this.loading = true
       this.error = null
       try {
-        // 获取运行实例列表（优先从索引文件）
+        // 获取运行实例列表（合并 manifest + positions_index）
         const runtimes = await getRuntimes(date)
 
         this.runtimes = runtimes
         this.positions = {}
         this.fetchedRuntimes = new Set<string>()
 
-        // 加载持仓数据
+        // 只对有实际数据的 runtime 加载持仓数据，避免大量 404 请求
+        const runtimesWithData = runtimes.filter(r => r.has_data)
         await Promise.all(
-          runtimes.map(r => this.fetchPositions(r.runtime_name, date))
+          runtimesWithData.map(r => this.fetchPositions(r.runtime_name, date))
         )
       } catch (err) {
         this.error = err instanceof Error ? err.message : 'Unknown error'

@@ -14,7 +14,7 @@
         :key="summary.strategy"
         class="strategy-row"
       >
-        <div class="col-name">{{ summary.strategy }}</div>
+        <div class="col-name">{{ summary.display_name || summary.strategy }}</div>
         <div class="col-tokens">
           <token-display
             :tokens="getTokenInfoForStrategy(summary.strategy)"
@@ -53,33 +53,38 @@ defineEmits<{
   'view-position': [runtimeName: string, symbol: string]
 }>()
 
-// 获取策略对应的所有代币及其交易模式
-function getTokenInfoForStrategy(strategy: string): { token: string; mode: TradingMode }[] {
+// 获取策略对应的所有代币及其交易模式（包括无仓位的）
+function getTokenInfoForStrategy(strategy: string): { token: string; mode: TradingMode; hasData: boolean }[] {
   const strategyRuntimes = props.runtimes.filter(r => r.strategy === strategy)
-  const tokenMap = new Map<string, TradingMode>()
+  const tokenMap = new Map<string, { mode: TradingMode; hasData: boolean }>()
 
   for (const runtime of strategyRuntimes) {
-    const positions = props.positions[runtime.runtime_name]
-    if (positions && positions.length > 0) {
-      tokenMap.set(runtime.symbol, runtime.trading_mode)
+    const hasPositions = !!(props.positions[runtime.runtime_name]?.length)
+    const existing = tokenMap.get(runtime.symbol)
+    // 如果已有且任一 runtime 有仓位，则标记为有数据
+    if (existing) {
+      if (hasPositions) existing.hasData = true
+    } else {
+      tokenMap.set(runtime.symbol, { mode: runtime.trading_mode, hasData: hasPositions || runtime.has_data })
     }
   }
 
   return Array.from(tokenMap.entries())
-    .map(([token, mode]) => ({ token, mode }))
-    .sort((a, b) => a.token.localeCompare(b.token))
+    .map(([token, info]) => ({ token, mode: info.mode, hasData: info.hasData }))
+    .sort((a, b) => {
+      // 有数据的排前面
+      if (a.hasData !== b.hasData) return a.hasData ? -1 : 1
+      return a.token.localeCompare(b.token)
+    })
 }
 
-// 获取策略对应的所有模式
+// 获取策略对应的所有模式（包括无仓位的）
 function getModesForStrategy(strategy: string): TradingMode[] {
   const strategyRuntimes = props.runtimes.filter(r => r.strategy === strategy)
   const modes = new Set<TradingMode>()
 
   for (const runtime of strategyRuntimes) {
-    const positions = props.positions[runtime.runtime_name]
-    if (positions && positions.length > 0) {
-      modes.add(runtime.trading_mode)
-    }
+    modes.add(runtime.trading_mode)
   }
 
   return Array.from(modes)

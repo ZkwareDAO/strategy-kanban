@@ -4,9 +4,9 @@
       <span
         v-for="(item, index) in visibleTokens"
         :key="index"
-        class="token-tag clickable"
-        :class="`mode-${item.mode}`"
-        @click="$emit('click', item.token)"
+        class="token-tag"
+        :class="[`mode-${item.mode}`, { 'no-data': !item.hasData, clickable: item.hasData }]"
+        @click="item.hasData && $emit('click', item.token)"
       >
         {{ item.token }}
       </span>
@@ -23,9 +23,9 @@
             <span
               v-for="(item, index) in remainingTokens"
               :key="index"
-              class="token-tag clickable"
-              :class="`mode-${item.mode}`"
-              @click="$emit('click', item.token)"
+              class="token-tag"
+              :class="[`mode-${item.mode}`, { 'no-data': !item.hasData, clickable: item.hasData }]"
+              @click="item.hasData && $emit('click', item.token)"
             >
               {{ item.token }}
             </span>
@@ -41,7 +41,7 @@ import { computed } from 'vue'
 import type { TradingMode } from '@/models/runtime'
 
 const props = defineProps<{
-  tokens: { token: string; mode: TradingMode }[]
+  tokens: { token: string; mode: TradingMode; hasData: boolean }[]
 }>()
 
 defineEmits<{
@@ -92,6 +92,11 @@ const remainingCount = computed(() => {
 .token-tag.clickable {
   cursor: pointer;
   transition: all 0.2s;
+}
+
+.token-tag.no-data {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .mode-live {
