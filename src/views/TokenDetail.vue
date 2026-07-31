@@ -83,6 +83,7 @@
         :display-count="displayCount"
         :backplay-signals="showBackplay ? backplaySignals : undefined"
         @entry-click="handleEntryClick"
+        @exit-click="handleExitClick"
       />
 
       <!-- Entry Detail Dialog -->
@@ -186,6 +187,13 @@ const highlightPositionId = ref('')
 function handleEntryClick(entry: { position_id: string; position_type: string; entry_price: number; datetime: string }) {
   entryDialogTitle.value = `${entry.position_type === 'long' ? '做多' : '做空'}开仓 - $${entry.entry_price.toFixed(2)} - ${entry.datetime}`
   highlightPositionId.value = entry.position_id
+  entryDialogVisible.value = true
+}
+
+// 处理平仓点点击
+function handleExitClick(exit: { position_id: string; position_type: string; exit_price: number; datetime: string }) {
+  entryDialogTitle.value = `${exit.position_type === 'long' ? '做多' : '做空'}平仓 - $${exit.exit_price.toFixed(2)} - ${exit.datetime}`
+  highlightPositionId.value = exit.position_id
   entryDialogVisible.value = true
 }
 

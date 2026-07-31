@@ -2,7 +2,7 @@
  * K线数据重采样工具
  */
 
-import type { KlinePoint, TimeframeValue } from '@/models/kline'
+import type { KlinePoint, TimeframeValue, EntryInfo, ExitInfo } from '@/models/kline'
 
 /**
  * 将 1 分钟数据重采样到指定周期
@@ -35,14 +35,41 @@ export function resampleKline(data: KlinePoint[], timeframe: TimeframeValue): Kl
 
     if (periodIndex === -1) {
       // 创建新的周期K线
-      resampled.push({
+      const newKline: KlinePoint = {
         ...current,
         timestamp: periodStart,
         datetime: new Date(periodStart * 1000).toISOString().replace('T', ' ').substring(0, 19),
         // 保留开平仓的精确时间（用于显示）
         entry_time: current.is_entry ? current.datetime : undefined,
         exit_time: current.is_exit ? current.datetime : undefined,
-      })
+        // 收集该K线上的所有开仓点
+        entries: current.is_entry
+          ? [{
+              position_id: current.position_id,
+              position_type: current.position_type,
+              entry_price: current.entry_price,
+              entry_time: current.datetime,
+            }]
+          : [],
+        // 收集该K线上的所有平仓点
+        exits: current.is_exit
+          ? [{
+              position_id: current.position_id,
+              position_type: current.position_type,
+              exit_price: current.close,
+              exit_time: current.datetime,
+            }]
+          : [],
+      }
+
+      // 如果是开仓点，将 entry_price 限制在 K 线价格范围内
+      if (current.is_entry && current.entry_price) {
+        const minPrice = Math.min(current.open, current.high, current.low, current.close)
+        const maxPrice = Math.max(current.open, current.high, current.low, current.close)
+        newKline.entry_price = Math.max(minPrice, Math.min(maxPrice, current.entry_price))
+      }
+
+      resampled.push(newKline)
     } else {
       // 更新现有周期K线
       const existing = resampled[periodIndex]
@@ -50,19 +77,42 @@ export function resampleKline(data: KlinePoint[], timeframe: TimeframeValue): Kl
       existing.low = Math.min(existing.low, current.low)
       existing.close = current.close
 
-      // 保持开平仓标记
+      // 收集开仓点到 entries 数组（而不是覆盖）
       if (current.is_entry) {
         existing.is_entry = true
         existing.entry_time = current.datetime // 保留精确时间
+
+        // 追加到 entries 数组
+        if (!existing.entries) existing.entries = []
+        existing.entries.push({
+          position_id: current.position_id,
+          position_type: current.position_type,
+          entry_price: current.entry_price,
+          entry_time: current.datetime,
+        })
       }
       if (current.is_exit) {
         existing.is_exit = true
         existing.exit_time = current.datetime // 保留精确时间
+
+        // 追加到 exits 数组
+        if (!existing.exits) existing.exits = []
+        existing.exits.push({
+          position_id: current.position_id,
+          position_type: current.position_type,
+          exit_price: current.close,
+          exit_time: current.datetime,
+        })
       }
 
       // 保持其他信息（取最后一个的值）
       if (current.position_id) existing.position_id = current.position_id
-      if (current.entry_price) existing.entry_price = current.entry_price
+      if (current.entry_price) {
+        // 将 entry_price 限制在当前 K 线的价格范围内
+        const minPrice = Math.min(existing.open, existing.high, existing.low, existing.close)
+        const maxPrice = Math.max(existing.open, existing.high, existing.low, existing.close)
+        existing.entry_price = Math.max(minPrice, Math.min(maxPrice, current.entry_price))
+      }
       if (current.position_type) existing.position_type = current.position_type
       if (current.pnl_pct !== undefined) existing.pnl_pct = current.pnl_pct
     }

@@ -34,6 +34,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   entryClick: [entry: { position_id: string; position_type: string; entry_price: number; datetime: string }]
+  exitClick: [exit: { position_id: string; position_type: string; exit_price: number; datetime: string }]
 }>()
 
 const chartContainer = ref<HTMLDivElement>()
@@ -127,8 +128,74 @@ function renderChart() {
   traces.push(candlestick)
 
   // Entry/Exit markers with indicator values
-  const entryPoints = displayData.filter(d => d.is_entry)
-  const exitPoints = displayData.filter(d => d.is_exit)
+  // 展开所有开仓点：重采样后一根K线上可能有多个开仓点
+  const entryPoints: Array<{
+    position_id: string
+    position_type: 'long' | 'short'
+    entry_price: number
+    datetime: string
+    entry_time?: string
+    klineIndex: number
+  }> = []
+  for (let i = 0; i < displayData.length; i++) {
+    const d = displayData[i]
+    if (d.entries && d.entries.length > 0) {
+      // 使用 entries 数组（重采样后一根K线可能有多个开仓点）
+      for (const entry of d.entries) {
+        entryPoints.push({
+          position_id: entry.position_id,
+          position_type: entry.position_type,
+          entry_price: entry.entry_price,
+          datetime: d.datetime,
+          entry_time: entry.entry_time,
+          klineIndex: i,
+        })
+      }
+    } else if (d.is_entry) {
+      // 1分钟数据没有 entries 数组，使用单值字段
+      entryPoints.push({
+        position_id: d.position_id,
+        position_type: d.position_type,
+        entry_price: d.entry_price,
+        datetime: d.datetime,
+        entry_time: d.entry_time,
+        klineIndex: i,
+      })
+    }
+  }
+  // 展开所有平仓点：重采样后一根K线上可能有多个平仓点
+  const exitPoints: Array<{
+    position_id: string
+    position_type: 'long' | 'short'
+    exit_price: number
+    datetime: string
+    exit_time?: string
+    klineIndex: number
+  }> = []
+  for (let i = 0; i < displayData.length; i++) {
+    const d = displayData[i]
+    if (d.exits && d.exits.length > 0) {
+      for (const ex of d.exits) {
+        exitPoints.push({
+          position_id: ex.position_id,
+          position_type: ex.position_type,
+          exit_price: ex.exit_price,
+          datetime: d.datetime,
+          exit_time: ex.exit_time,
+          klineIndex: i,
+        })
+      }
+    } else if (d.is_exit) {
+      exitPoints.push({
+        position_id: d.position_id,
+        position_type: d.position_type,
+        exit_price: d.close,
+        datetime: d.datetime,
+        exit_time: d.exit_time,
+        klineIndex: i,
+      })
+    }
+  }
 
   // Helper function to get indicator values at a specific index
   function getIndicatorText(index: number): string {
@@ -153,14 +220,13 @@ function renderChart() {
 
   // Entry points (开仓点) - 显示技术指标值
   if (entryPoints.length > 0) {
-    const entryTexts = entryPoints.map(d => {
-      const idx = displayData.findIndex(k => k.datetime === d.datetime)
-      const indicatorText = idx >= 0 ? getIndicatorText(idx) : ''
+    const entryTexts = entryPoints.map(ep => {
+      const indicatorText = getIndicatorText(ep.klineIndex)
       // 使用 entry_time（精确时间）或 fallback 到 datetime
-      const timeDisplay = d.entry_time || d.datetime
+      const timeDisplay = ep.entry_time || ep.datetime
       const parts = [
-        `<b>${d.position_type === 'long' ? '做多开仓' : '做空开仓'}</b>`,
-        `价格: ${d.entry_price!.toFixed(2)}`,
+        `<b>${ep.position_type === 'long' ? '做多开仓' : '做空开仓'}</b>`,
+        `价格: ${ep.entry_price.toFixed(2)}`,
         `时间: ${timeDisplay}`,
       ]
       if (indicatorText) {
@@ -171,22 +237,22 @@ function renderChart() {
     })
 
     traces.push({
-      x: entryPoints.map(d => d.datetime),
-      y: entryPoints.map(d => d.entry_price!),
+      x: entryPoints.map(ep => ep.datetime),
+      y: entryPoints.map(ep => ep.entry_price),
       type: 'scatter',
       mode: 'markers+text',
       name: '开仓点',
       marker: {
         symbol: 'circle',
         size: 14,
-        color: entryPoints.map(d => d.position_type === 'long' ? '#22c55e' : '#ef4444'),
+        color: entryPoints.map(ep => ep.position_type === 'long' ? '#22c55e' : '#ef4444'),
         line: { width: 2, color: 'white' },
       },
-      text: entryPoints.map(d => d.position_type === 'long' ? 'B' : 'S'),
+      text: entryPoints.map(ep => ep.position_type === 'long' ? 'B' : 'S'),
       textposition: 'top center',
       textfont: {
         size: 14,
-        color: entryPoints.map(d => d.position_type === 'long' ? '#22c55e' : '#ef4444'),
+        color: entryPoints.map(ep => ep.position_type === 'long' ? '#22c55e' : '#ef4444'),
         family: 'Arial Black',
       },
       hovertext: entryTexts,
@@ -198,15 +264,13 @@ function renderChart() {
 
   // Exit points (平仓点) - 显示技术指标值
   if (exitPoints.length > 0) {
-    const exitTexts = exitPoints.map(d => {
-      const idx = displayData.findIndex(k => k.datetime === d.datetime)
-      const indicatorText = idx >= 0 ? getIndicatorText(idx) : ''
+    const exitTexts = exitPoints.map(ep => {
+      const indicatorText = getIndicatorText(ep.klineIndex)
       // 使用 exit_time（精确时间）或 fallback 到 datetime
-      const timeDisplay = d.exit_time || d.datetime
+      const timeDisplay = ep.exit_time || ep.datetime
       const parts = [
         `<b>平仓</b>`,
-        `价格: ${d.close.toFixed(2)}`,
-        `ROI: ${d.pnl_pct!.toFixed(2)}%`,
+        `价格: ${ep.exit_price.toFixed(2)}`,
         `时间: ${timeDisplay}`,
       ]
       if (indicatorText) {
@@ -217,8 +281,8 @@ function renderChart() {
     })
 
     traces.push({
-      x: exitPoints.map(d => d.datetime),
-      y: exitPoints.map(d => d.close),
+      x: exitPoints.map(ep => ep.datetime),
+      y: exitPoints.map(ep => ep.exit_price),
       type: 'scatter',
       mode: 'markers',
       name: '平仓点',
@@ -421,20 +485,33 @@ function renderChart() {
       const point = eventData.points[0]
       if (!point) return
 
-      // 检查是否点击的是开仓点（curveNumber 对应 traces 中的开仓点 trace）
-      // 开仓点是第 1 个 trace（index 1），因为第 0 个是 candlestick
-      const entryPoints = displayData.filter(d => d.is_entry)
-      if (entryPoints.length === 0) return
+      // curveNumber 对应 traces 数组中的索引：
+      // 0 = candlestick, 1 = 开仓点, 2 = 平仓点（可能不存在）
+      const entryCurveIndex = 1
+      const exitCurveIndex = entryPoints.length > 0 ? 2 : 1
 
-      // 找到对应的开仓点
-      const entryPoint = entryPoints.find(d => d.datetime === point.x)
-      if (entryPoint && entryPoint.entry_price) {
-        emit('entryClick', {
-          position_id: entryPoint.position_id ?? 'default',
-          position_type: entryPoint.position_type ?? 'long',
-          entry_price: entryPoint.entry_price,
-          datetime: entryPoint.entry_time || entryPoint.datetime
-        })
+      if (point.curveNumber === entryCurveIndex && entryPoints.length > 0) {
+        // 点击开仓点
+        const entryPoint = entryPoints[point.pointNumber]
+        if (entryPoint) {
+          emit('entryClick', {
+            position_id: entryPoint.position_id,
+            position_type: entryPoint.position_type,
+            entry_price: entryPoint.entry_price,
+            datetime: entryPoint.entry_time || entryPoint.datetime
+          })
+        }
+      } else if (point.curveNumber === exitCurveIndex && exitPoints.length > 0) {
+        // 点击平仓点
+        const exitPoint = exitPoints[point.pointNumber]
+        if (exitPoint) {
+          emit('exitClick', {
+            position_id: exitPoint.position_id,
+            position_type: exitPoint.position_type,
+            exit_price: exitPoint.exit_price,
+            datetime: exitPoint.exit_time || exitPoint.datetime
+          })
+        }
       }
     })
   }

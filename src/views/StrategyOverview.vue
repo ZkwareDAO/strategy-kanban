@@ -64,12 +64,18 @@ function handleViewPosition(runtimeName: string, symbol: string) {
 }
 
 onMounted(async () => {
-  // 默认选择昨天的日期
-  const yesterday = new Date()
-  yesterday.setDate(yesterday.getDate() - 1)
-  const defaultDate = yesterday.toISOString().slice(0, 10).replace(/-/g, '')
-  selectedDate.value = defaultDate
-  await handleDateChange(defaultDate)
+  // 如果 appStore 已经有日期（从详情页返回），使用之前选择的日期
+  // 否则默认选择昨天的日期
+  if (appStore.date) {
+    selectedDate.value = appStore.date
+    await strategyStore.fetchRuntimes(appStore.date)
+  } else {
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const defaultDate = yesterday.toISOString().slice(0, 10).replace(/-/g, '')
+    selectedDate.value = defaultDate
+    await handleDateChange(defaultDate)
+  }
 })
 </script>
 

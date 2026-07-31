@@ -8,6 +8,34 @@
 export type TimeframeValue = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d'
 
 /**
+ * 开仓点信息（一根K线上可能有多个开仓点）
+ */
+export interface EntryInfo {
+  /** 仓位ID */
+  position_id: string
+  /** 仓位方向 */
+  position_type: 'long' | 'short'
+  /** 入场价 */
+  entry_price: number
+  /** 开仓精确时间 */
+  entry_time?: string
+}
+
+/**
+ * 平仓点信息（一根K线上可能有多个平仓点）
+ */
+export interface ExitInfo {
+  /** 仓位ID */
+  position_id: string
+  /** 仓位方向 */
+  position_type: 'long' | 'short'
+  /** 平仓价（K线收盘价） */
+  exit_price: number
+  /** 平仓精确时间 */
+  exit_time?: string
+}
+
+/**
  * K线数据点（分钟级）
  * @example
  * const kline: KlinePoint = {
@@ -49,4 +77,8 @@ export interface KlinePoint {
   entry_time?: string
   /** 平仓精确时间（重采样后保留） */
   exit_time?: string
+  /** 该K线上的所有开仓点（重采样后一根K线可能包含多个开仓点） */
+  entries?: EntryInfo[]
+  /** 该K线上的所有平仓点（重采样后一根K线可能包含多个平仓点） */
+  exits?: ExitInfo[]
 }
