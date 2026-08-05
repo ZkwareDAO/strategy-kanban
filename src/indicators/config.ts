@@ -181,11 +181,23 @@ REDACTED
   },
 }
 
+/** 策略前缀集合（从 strategies.ts 导入，用于多段前缀匹配） */
+import { STRATEGY_PREFIXES } from '@/config/strategies'
+const STRATEGY_PREFIX_SET: Set<string> = STRATEGY_PREFIXES
+
 /**
  * 根据 runtime_name 获取策略名称
+ * 支持多段前缀匹配: REGIME_DONCHIAN_ATR_4H → REGIMEDONCHIANATR
  */
 export function getStrategyFromRuntime(runtimeName: string): string {
-  // OBVATR_4H_2_NEARUSDT_PAPER -> OBVATR
   const parts = runtimeName.split('_')
+  // 尝试从最长前缀到最短前缀匹配
+  for (let len = parts.length; len >= 1; len--) {
+    const candidate = parts.slice(0, len).join('').toUpperCase()
+    if (STRATEGY_PREFIX_SET.has(candidate)) {
+      return candidate
+    }
+  }
+  // fallback: 返回第一段
   return parts[0]
 }

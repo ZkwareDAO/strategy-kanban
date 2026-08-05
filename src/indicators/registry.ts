@@ -8,14 +8,28 @@ import { RSIndicator, type RSIParams } from './rsi'
 import { MACDIndicator, type MACDParams } from './macd'
 import { ATRIndicator, type ATRParams } from './atr'
 import { EMAIndicator, type EMAParams } from './ema'
+import { BOLLIndicator, type BOLLParams } from './boll'
+import { KDIndicator, type KDParams } from './kd'
+import { ADXIndicator, type ADXParams } from './adx'
+import { OBVIndicator, type OBVParams } from './obv'
+import { DonchianIndicator, type DonchianParams } from './donchian'
+import { EnvelopeIndicator, type EnvelopeParams } from './envelope'
+import { SMAIndicator, type SMAParams } from './sma'
 
-export type IndicatorType = 'RSI' | 'MACD' | 'ATR' | 'EMA'
+export type IndicatorType = 'RSI' | 'MACD' | 'ATR' | 'EMA' | 'BOLL' | 'KD' | 'ADX' | 'OBV' | 'Donchian' | 'Envelope' | 'SMA'
 
 export interface IndicatorFactoryParams {
   RSI?: RSIParams
   MACD?: MACDParams
   ATR?: ATRParams
   EMA?: EMAParams
+  BOLL?: BOLLParams
+  KD?: KDParams
+  ADX?: ADXParams
+  OBV?: OBVParams
+  Donchian?: DonchianParams
+  Envelope?: EnvelopeParams
+  SMA?: SMAParams
 }
 
 const indicatorClasses = {
@@ -23,6 +37,13 @@ const indicatorClasses = {
   MACD: MACDIndicator,
   ATR: ATRIndicator,
   EMA: EMAIndicator,
+  BOLL: BOLLIndicator,
+  KD: KDIndicator,
+  ADX: ADXIndicator,
+  OBV: OBVIndicator,
+  Donchian: DonchianIndicator,
+  Envelope: EnvelopeIndicator,
+  SMA: SMAIndicator,
 } as const
 
 export function createIndicator(
@@ -40,7 +61,9 @@ export function createIndicators(
   types: IndicatorType[],
   params?: IndicatorFactoryParams
 ): BaseIndicator[] {
-  return types.map(type => createIndicator(type, params?.[type]))
+  return types
+    .filter(type => type in indicatorClasses)
+    .map(type => createIndicator(type, params?.[type]))
 }
 
 export { BaseIndicator } from './base'
@@ -50,3 +73,10 @@ export * from './rsi'
 export * from './macd'
 export * from './atr'
 export * from './ema'
+export * from './boll'
+export * from './kd'
+export * from './adx'
+export * from './obv'
+export * from './donchian'
+export * from './envelope'
+export * from './sma'

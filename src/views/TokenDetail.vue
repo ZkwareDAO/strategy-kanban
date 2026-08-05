@@ -27,19 +27,19 @@
             <div class="logic-section-inline">
               <div class="logic-title-inline">【开仓条件】</div>
               <ul>
-                <li v-for="(rule, idx) in mockLogic.entry_conditions.rules" :key="idx">{{ rule }}</li>
+                <li v-for="(rule, idx) in strategyLogic.entry_conditions.rules" :key="idx">{{ rule }}</li>
               </ul>
             </div>
             <div class="logic-section-inline">
               <div class="logic-title-inline">【平仓条件】</div>
               <ul>
-                <li v-for="(rule, idx) in mockLogic.exit_conditions.rules" :key="idx">{{ rule }}</li>
+                <li v-for="(rule, idx) in strategyLogic.exit_conditions.rules" :key="idx">{{ rule }}</li>
               </ul>
             </div>
             <div class="logic-section-inline">
               <div class="logic-title-inline">【风控】</div>
               <ul>
-                <li v-for="(rule, idx) in mockLogic.risk_management.rules" :key="idx">{{ rule }}</li>
+                <li v-for="(rule, idx) in strategyLogic.risk_management.rules" :key="idx">{{ rule }}</li>
               </ul>
             </div>
           </div>
@@ -62,7 +62,7 @@
         </div>
 
         <!-- Indicator Panel -->
-        <IndicatorPanel v-model="selectedIndicators" />
+        <IndicatorPanel v-model="selectedIndicators" :strategy="strategyPrefix" />
       </div>
 
       <!-- Timeframe Selector -->
@@ -123,6 +123,7 @@ import type { StrategyLogic as StrategyLogicType, SignalComparison } from '@/mod
 import type { KlinePoint, TimeframeValue } from '@/models/kline'
 import type { IndicatorType } from '@/indicators'
 import type { BacktestSignal } from '@/models/backtest'
+import { getStrategyConfigByDir, type StrategyConfig } from '@/config/strategies'
 
 const props = defineProps<{
   strategy: string
@@ -169,7 +170,7 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const klineData = ref<KlinePoint[]>([])
 const comparisonData = ref<SignalComparison | undefined>(undefined)
-const selectedIndicators = ref<IndicatorType[]>(['RSI', 'MACD', 'ATR'])
+const selectedIndicators = ref<IndicatorType[]>([])
 const selectedTimeframe = ref<TimeframeValue>('5m')
 const displayCount = ref(100)
 
@@ -231,21 +232,52 @@ watch(selectedTimeframe, (tf) => {
   displayCount.value = getDefaultDisplayCount(tf)
 }, { immediate: true })
 
-// Mock data for strategy logic (这些数据暂无API，保持mock)
-const mockLogic: StrategyLogicType = {
-  entry_conditions: {
-    title: '入场条件',
-    rules: ['RSI < 30 且 MACD 金叉', '价格突破布林带下轨', '成交量 > MA20 * 1.5'],
-  },
-  exit_conditions: {
-    title: '出场条件',
-    rules: ['RSI > 70 或 MACD 死叉', '止损: -3%', '止盈: +8%'],
-  },
-  risk_management: {
-    title: '风控规则',
-    rules: ['单笔最大仓位 10%', '最大持仓数 5', '日最大亏损 5%'],
-  },
-}
+// 策略配置（直接用策略目录名查找，复用 PREFIX_STRATEGY_MAP 映射）
+const strategyConfig = computed<StrategyConfig | null>(() => getStrategyConfigByDir(props.strategy))
+const strategyPrefix = computed(() => strategyConfig.value?.strategy_prefix ?? '')
+
+// 策略逻辑（从策略配置获取，未匹配时使用默认）
+const strategyLogic = computed<StrategyLogicType>(() => {
+  const config = strategyConfig.value
+  if (config) {
+    return {
+      entry_conditions: { title: '入场条件', rules: config.logic.entry },
+      exit_conditions: { title: '出场条件', rules: config.logic.exit },
+      risk_management: { title: '风控规则', rules: config.logic.risk },
+    }
+  }
+  // fallback 默认逻辑
+  return {
+    entry_conditions: {
+      title: '入场条件',
+      rules: ['策略逻辑未配置，请查看策略代码'],
+    },
+    exit_conditions: {
+      title: '出场条件',
+      rules: ['策略逻辑未配置，请查看策略代码'],
+    },
+    risk_management: {
+      title: '风控规则',
+      rules: ['策略逻辑未配置，请查看策略代码'],
+    },
+  }
+})
+
+// 根据策略配置设置默认指标
+watch(strategyConfig, (config) => {
+  if (config) {
+    // 过滤出前端已实现的指标
+    const implemented = config.indicators.filter(
+      (i): i is IndicatorType => ['RSI', 'MACD', 'ATR', 'EMA', 'BOLL', 'KD', 'ADX', 'OBV', 'Donchian', 'Envelope', 'SMA'].includes(i)
+    )
+    if (implemented.length > 0) {
+      selectedIndicators.value = implemented
+      return
+    }
+  }
+  // fallback 默认指标
+  selectedIndicators.value = ['RSI', 'MACD', 'ATR']
+}, { immediate: true })
 
 async function fetchData() {
   if (!runtimeName.value || !date.value) {
