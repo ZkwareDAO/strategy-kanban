@@ -80,6 +80,8 @@ export interface Signal {
   time?: string
   timestamp?: string
   side: 'buy' | 'sell'
+  /** 权威方向字段：buy=开多 sell=开空 sell_close=平多 buy_close=平空。side 仅供样式，不表示真实方向 */
+  action?: 'buy' | 'sell' | 'sell_close' | 'buy_close'
   price?: number
   live_price?: number
   backtest_price?: number

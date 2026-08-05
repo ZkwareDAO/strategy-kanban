@@ -65,7 +65,7 @@
             >
               <div class="signal-id">{{ sig.signal_id || sig.live_signal_id }}</div>
               <div class="signal-info">
-                {{ sig.timestamp || sig.time }} {{ sig.side }} |
+                {{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} |
                 实盘: ${{ (sig.live_price || sig.price || 0).toLocaleString() }} |
                 回放: ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}
               </div>
@@ -89,7 +89,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.live_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ sig.side }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.reason" class="signal-reason">{{ sig.reason }}</div>
             </div>
           </div>
@@ -105,7 +105,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.backtest_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ sig.side }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.reason" class="signal-reason">{{ sig.reason }}</div>
             </div>
           </div>
@@ -124,7 +124,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.live_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ sig.side }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.match_type" class="signal-badge matched">已匹配</div>
             </div>
           </div>
@@ -144,7 +144,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.backtest_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ sig.side }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.match_type" class="signal-badge matched">已匹配</div>
             </div>
           </div>
@@ -164,7 +164,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.live_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ sig.side }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.reason" class="signal-reason">{{ sig.reason }}</div>
             </div>
           </div>
@@ -180,7 +180,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.backtest_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ sig.side }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.reason" class="signal-reason">{{ sig.reason }}</div>
             </div>
           </div>
@@ -196,13 +196,28 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { SignalComparison } from '@/models/detail'
+import type { SignalComparison, Signal } from '@/models/detail'
 
 const props = defineProps<{
   comparison?: SignalComparison
 }>()
 
 const activeTab = ref<'all' | 'live' | 'backtest' | 'unique'>('all')
+
+/**
+ * 根据 action 显示正确的方向：buy=开多 sell=开空 sell_close=平多 buy_close=平空。
+ * action 缺失时回退到 side。注意 side 不可直接用于显示方向，只有 action 是权威字段。
+ */
+function signalLabel(sig: Signal): string {
+  switch (sig.action) {
+    case 'buy': return '开多'
+    case 'sell': return '开空'
+    case 'sell_close': return '平多'
+    case 'buy_close': return '平空'
+    default:
+      return sig.side === 'buy' ? '开多' : '开空'
+  }
+}
 
 const accuracyPercent = computed(() => {
   if (!props.comparison) return '0%'

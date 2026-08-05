@@ -11,16 +11,10 @@ import type { KlinePoint, TimeframeValue, EntryInfo, ExitInfo } from '@/models/k
  * @returns 重采样后的 K 线数据
  */
 export function resampleKline(data: KlinePoint[], timeframe: TimeframeValue): KlinePoint[] {
-  // 如果是 1 分钟，直接返回
-  if (timeframe === '1m') {
-    return data
-  }
-
-  // 解析周期
+  // 解析周期。1m 时 intervalMinutes=1，periodStart 即分钟对齐的时间戳，
+  // 此时下方分组逻辑会合并同一分钟内多个仓位产生的重复 K 线（v1 kline CSV 每个仓位一行），
+  // 否则 category 轴上「数组下标 ≠ 唯一类别数」会导致 range 越界、1m 蜡烛图一片空白。
   const intervalMinutes = parseTimeframe(timeframe)
-  if (intervalMinutes === 1) {
-    return data
-  }
 
   const resampled: KlinePoint[] = []
 

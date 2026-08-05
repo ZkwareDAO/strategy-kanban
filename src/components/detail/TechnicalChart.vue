@@ -482,35 +482,40 @@ function renderChart() {
   // 添加点击事件监听
   if (chartContainer.value) {
     chartContainer.value.on('plotly_click', (eventData: { points: Array<{ curveNumber: number; pointNumber: number; x: string; y: number }> }) => {
-      const point = eventData.points[0]
-      if (!point) return
+      if (!eventData.points || eventData.points.length === 0) return
 
       // curveNumber 对应 traces 数组中的索引：
       // 0 = candlestick, 1 = 开仓点, 2 = 平仓点（可能不存在）
+      // 叠加指标（SMA/Envelope 等 subplot=false）的折线绘制在主图最上层，点击开/平仓
+      // 标记时 eventData.points[0] 可能命中叠加折线而非标记，因此需遍历所有命中的点。
       const entryCurveIndex = 1
       const exitCurveIndex = entryPoints.length > 0 ? 2 : 1
 
-      if (point.curveNumber === entryCurveIndex && entryPoints.length > 0) {
-        // 点击开仓点
-        const entryPoint = entryPoints[point.pointNumber]
-        if (entryPoint) {
-          emit('entryClick', {
-            position_id: entryPoint.position_id,
-            position_type: entryPoint.position_type,
-            entry_price: entryPoint.entry_price,
-            datetime: entryPoint.entry_time || entryPoint.datetime
-          })
-        }
-      } else if (point.curveNumber === exitCurveIndex && exitPoints.length > 0) {
-        // 点击平仓点
-        const exitPoint = exitPoints[point.pointNumber]
-        if (exitPoint) {
-          emit('exitClick', {
-            position_id: exitPoint.position_id,
-            position_type: exitPoint.position_type,
-            exit_price: exitPoint.exit_price,
-            datetime: exitPoint.exit_time || exitPoint.datetime
-          })
+      for (const point of eventData.points) {
+        if (point.curveNumber === entryCurveIndex && entryPoints.length > 0) {
+          // 点击开仓点
+          const entryPoint = entryPoints[point.pointNumber]
+          if (entryPoint) {
+            emit('entryClick', {
+              position_id: entryPoint.position_id,
+              position_type: entryPoint.position_type,
+              entry_price: entryPoint.entry_price,
+              datetime: entryPoint.entry_time || entryPoint.datetime
+            })
+            return
+          }
+        } else if (point.curveNumber === exitCurveIndex && exitPoints.length > 0) {
+          // 点击平仓点
+          const exitPoint = exitPoints[point.pointNumber]
+          if (exitPoint) {
+            emit('exitClick', {
+              position_id: exitPoint.position_id,
+              position_type: exitPoint.position_type,
+              exit_price: exitPoint.exit_price,
+              datetime: exitPoint.exit_time || exitPoint.datetime
+            })
+            return
+          }
         }
       }
     })

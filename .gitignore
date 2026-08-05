@@ -21,6 +21,8 @@ components.d.ts
 
 # Data files (symlink to external data)
 public/data
+public/backtest-output
+public/backtest-output-index.json
 
 # Editor directories and files
 .vscode/*
