@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="header">
       <h1>交易复盘系统</h1>
-      <div class="date-picker">
+      <div v-if="activeTab === 'strategy'" class="date-picker">
         <label>日期:</label>
         <el-date-picker
           v-model="selectedDate"
@@ -16,15 +16,26 @@
       </div>
     </div>
 
-    <!-- Strategy List -->
-    <div v-if="strategyStore.loading" class="loading">加载中...</div>
-    <strategy-list
-      v-else
-      :summaries="strategyStore.strategySummaries"
-      :runtimes="strategyStore.runtimes"
-      :positions="strategyStore.positions"
-      @view-position="handleViewPosition"
-    />
+    <!-- 模式切换 -->
+    <el-tabs v-model="activeTab" class="mode-tabs">
+      <el-tab-pane label="策略表格" name="strategy" />
+      <el-tab-pane label="回测详情" name="backtest" />
+    </el-tabs>
+
+    <!-- 回测详情 -->
+    <backtest-overview v-if="activeTab === 'backtest'" />
+
+    <!-- 策略表格 -->
+    <template v-else>
+      <div v-if="strategyStore.loading" class="loading">加载中...</div>
+      <strategy-list
+        v-else
+        :summaries="strategyStore.strategySummaries"
+        :runtimes="strategyStore.runtimes"
+        :positions="strategyStore.positions"
+        @view-position="handleViewPosition"
+      />
+    </template>
   </div>
 </template>
 
@@ -34,12 +45,14 @@ import { useRouter } from 'vue-router'
 import { useStrategyStore } from '@/stores/strategy'
 import { useAppStore } from '@/stores/app'
 import StrategyList from '@/components/strategy/StrategyList.vue'
+import BacktestOverview from '@/components/BacktestOverview.vue'
 
 const router = useRouter()
 const strategyStore = useStrategyStore()
 const appStore = useAppStore()
 
 const selectedDate = ref('')
+const activeTab = ref<'strategy' | 'backtest'>('strategy')
 
 async function handleDateChange(date: string) {
   appStore.setDate(date)
@@ -116,6 +129,14 @@ onMounted(async () => {
     font-size: 14px;
     color: #6b7280;
   }
+}
+
+.mode-tabs {
+  background: white;
+  padding: 0 20px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  margin-bottom: 20px;
 }
 
 .loading {
