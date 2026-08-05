@@ -8,7 +8,7 @@
 - **Vite** 构建
 - **Pinia** 状态管理
 - **Element Plus** UI 组件
-- **ECharts** / **vue-echarts** 图表（蜡烛图、ROI/价格趋势图）
+- **Plotly.js** 蜡烛图（`TechnicalChart.vue`）/ **ECharts** + **vue-echarts** ROI/价格趋势图
 - **Vitest** 单元测试
 
 ## 架构概览
@@ -35,8 +35,9 @@ trading-review-frontend (本项目)
 
 | 路径 | 页面 | 说明 |
 |------|------|------|
-| `/` | `StrategyOverview` | 策略概览（页面1）：展示所有策略、代币、模式、仓位统计 |
-| `/detail/:strategy/:symbol` | `TokenDetail` | 代币详情（页面2）：蜡烛图、ROI/价格趋势、技术指标、回放对比 |
+| `/` | `StrategyOverview` | 策略概览（页面1）：「策略表格 / 回测详情」tab，展示所有策略、代币、仓位统计 |
+| `/detail/:strategy/:symbol` | `TokenDetail` | 代币详情（V1）：蜡烛图、ROI/价格趋势、技术指标、回放对比 |
+| `/detail-v2/:strategy/:symbol` | `TokenDetailV2` | 代币详情（V2 数据分离版）：K线与仓位解耦，纯K线模式可选叠加仓位/回测 |
 
 ## 可用命令
 
