@@ -21,6 +21,7 @@ components.d.ts
 
 # Data files (symlink to external data)
 public/data
+public/kline-data
 public/backtest-output
 public/backtest-output-index.json
 
