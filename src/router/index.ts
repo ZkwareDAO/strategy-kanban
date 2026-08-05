@@ -14,6 +14,12 @@ const router = createRouter({
       component: () => import('@/views/TokenDetail.vue'),
       props: true,
     },
+    {
+      path: '/detail-v2/:strategy/:symbol',
+      name: 'TokenDetailV2',
+      component: () => import('@/views/TokenDetailV2.vue'),
+      props: true,
+    },
   ],
 })
 
