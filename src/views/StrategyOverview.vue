@@ -45,7 +45,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useStrategyStore } from '@/stores/strategy'
 import { useAppStore } from '@/stores/app'
 import StrategyList from '@/components/strategy/StrategyList.vue'
@@ -53,6 +53,7 @@ import BacktestOverview from '@/components/BacktestOverview.vue'
 import PerformanceOverview from '@/components/PerformanceOverview.vue'
 
 const router = useRouter()
+const route = useRoute()
 const strategyStore = useStrategyStore()
 const appStore = useAppStore()
 
@@ -82,6 +83,12 @@ function handleViewPosition(runtimeName: string, symbol: string) {
 }
 
 onMounted(async () => {
+  // 从详情页返回时，通过 query.tab 恢复到对应 tab
+  const tabParam = route.query.tab as string
+  if (tabParam === 'backtest' || tabParam === 'performance') {
+    activeTab.value = tabParam
+  }
+
   // 如果 appStore 已经有日期（从详情页返回），使用之前选择的日期
   // 否则默认选择昨天的日期
   if (appStore.date) {

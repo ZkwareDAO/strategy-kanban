@@ -97,23 +97,36 @@ const dateRange = ref<[string, string]>([
   today.toISOString().slice(0, 10),
 ])
 
-// 聚合策略维度数据
+// 从 strategy_name 提取策略组名（去掉最后的 _SYMBOL 部分）
+// 例如: DOLPHINV2_4H_2_DOGEUSDT → DOLPHINV2_4H_2
+//       VWAPMOM_15M_1_XLMUSDT → VWAPMOM_15M_1
+//       SYNC_BTC-21AUG26-63000-P → SYNC (期权策略，特殊处理)
+function extractStrategyGroup(strategyName: string): string {
+  // 期权策略以 SYNC_ 开头，整个 strategy_name 就是组名（没有代币后缀可拆）
+  if (strategyName.startsWith('SYNC_')) return strategyName
+  // 期货策略：去掉最后一个 _XXX 部分（代币名）
+  const lastUnderscore = strategyName.lastIndexOf('_')
+  if (lastUnderscore <= 0) return strategyName
+  return strategyName.slice(0, lastUnderscore)
+}
+
+// 聚合策略维度数据（按策略组名聚合）
 const strategyList = computed<StrategyPerformance[]>(() => {
   // 只统计已平仓的期货交易 (deleted=1, pos_type=2)
   const closed = rawPositions.value.filter(p => p.deleted === 1 && p.pos_type === 2)
   const map = new Map<string, StrategyPerformance>()
 
   for (const p of closed) {
-    const name = p.strategy_name
-    const existing = map.get(name)
+    const group = extractStrategyGroup(p.strategy_name)
+    const existing = map.get(group)
     if (existing) {
       existing.total_trades += 1
       if (p.pnl_value > 0) existing.winning_trades += 1
       if (p.pnl_value < 0) existing.losing_trades += 1
       existing.total_pnl += p.pnl_value
     } else {
-      map.set(name, {
-        strategy_name: name,
+      map.set(group, {
+        strategy_name: group,
         total_trades: 1,
         winning_trades: p.pnl_value > 0 ? 1 : 0,
         losing_trades: p.pnl_value < 0 ? 1 : 0,

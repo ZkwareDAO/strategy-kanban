@@ -1,6 +1,6 @@
 import type { OrderPosition } from '@/models/performance'
 
-const API_BASE = '/api/position'
+const API_BASE = import.meta.env.VITE_API_POSITION_PREFIX || '/api/position'
 
 export interface OrderPositionsResponse {
   code: number

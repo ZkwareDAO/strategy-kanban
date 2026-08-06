@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 import { resolve, join } from 'node:path'
@@ -136,40 +136,43 @@ function backtestIndexPlugin(): Plugin {
 }
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [
-    vue(),
-    AutoImport({
-      resolvers: [ElementPlusResolver()],
-    }),
-    Components({
-      resolvers: [ElementPlusResolver()],
-    }),
-    backtestIndexPlugin(),
-  ],
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
-    }
-  },
-  server: {
-    host: true,
-    port: 3000,
-    proxy: {
-      '/api/position': {
-        target: 'https://api.zkware.cn',
-        changeOrigin: true,
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), 'VITE_')
+  return {
+    plugins: [
+      vue(),
+      AutoImport({
+        resolvers: [ElementPlusResolver()],
+      }),
+      Components({
+        resolvers: [ElementPlusResolver()],
+      }),
+      backtestIndexPlugin(),
+    ],
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url))
+      }
+    },
+    server: {
+      host: true,
+      port: 3000,
+      proxy: {
+        [env.VITE_API_POSITION_PREFIX || '/api/position']: {
+          target: env.VITE_API_POSITION_TARGET || 'https://api.example.com',
+          changeOrigin: true,
+        },
       },
-    },
-    watch: {
-      // public/ 下的 data / kline-data / backtest-output 是指向外部数据目录的符号链接，
-      // 体量巨大且为静态数据（无需 HMR）。关闭符号链接跟随以免耗尽 inotify (ENOSPC)。
-      followSymlinks: false,
-      ignored: [
-        '**/public/data/**',
-        '**/public/kline-data/**',
-        '**/public/backtest-output/**',
-      ],
-    },
+      watch: {
+        // public/ 下的 data / kline-data / backtest-output 是指向外部数据目录的符号链接，
+        // 体量巨大且为静态数据（无需 HMR）。关闭符号链接跟随以免耗尽 inotify (ENOSPC)。
+        followSymlinks: false,
+        ignored: [
+          '**/public/data/**',
+          '**/public/kline-data/**',
+          '**/public/backtest-output/**',
+        ],
+      },
+    }
   }
 })

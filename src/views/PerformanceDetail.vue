@@ -1,6 +1,6 @@
 <template>
   <div class="performance-detail-page">
-    <button class="back-btn" @click="$router.back()">← 返回策略表现</button>
+    <button class="back-btn" @click="goBack">← 返回策略表现</button>
 
     <div class="page-header">
       <h2>{{ strategyName }}</h2>
@@ -44,7 +44,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { getOrderPositions } from '@/api/performance'
 import type { OrderPosition, SymbolPerformance } from '@/models/performance'
 
@@ -53,6 +53,7 @@ const props = defineProps<{
 }>()
 
 const route = useRoute()
+const router = useRouter()
 const dateFrom = route.query.from as string
 const dateTo = route.query.to as string
 
@@ -120,7 +121,11 @@ async function fetchData() {
     const from = toRfc3339(dateToStartOfDay(dateFrom))
     const to = toRfc3339(dateToEndOfDay(dateTo))
     const allPositions = await getOrderPositions(from, to)
-    rawPositions.value = allPositions.filter(p => p.strategy_name === props.strategyName)
+    // 匹配策略组：strategy_name 以策略组名开头（如 DOLPHINV2_4H_2_DOGEUSDT 匹配 DOLPHINV2_4H_2）
+    rawPositions.value = allPositions.filter(p => {
+      if (p.strategy_name === props.strategyName) return true
+      return p.strategy_name.startsWith(props.strategyName + '_')
+    })
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -144,6 +149,10 @@ function winRateClass(v: number): string {
 
 function pnlClass(v: number): string {
   return v > 0 ? 'val-positive' : v < 0 ? 'val-negative' : ''
+}
+
+function goBack() {
+  router.push({ path: '/', query: { tab: 'performance' } })
 }
 
 onMounted(fetchData)

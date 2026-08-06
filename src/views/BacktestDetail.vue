@@ -1,6 +1,6 @@
 <template>
   <div class="backtest-detail-page">
-    <button class="back-btn" @click="$router.back()">← 返回回测列表</button>
+    <button class="back-btn" @click="goBack">← 返回回测列表</button>
 
     <div v-if="loading" class="state">加载中...</div>
     <div v-else-if="error" class="state error">{{ error }}</div>
@@ -161,8 +161,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
-import Plotly, { type Data, type Layout } from 'plotly.js-dist-min'
+import { useRoute, useRouter } from 'vue-router'
+import Plotly, { type Data, type Layout, type Config } from 'plotly.js-dist-min'
 import { getBacktestResult, getBacktestEquity, getDailyKlineClose } from '@/api/backtest'
 import type { BacktestResult } from '@/models/backtest'
 import type { EquityPoint, DailyClosePoint } from '@/api/backtest'
@@ -173,6 +173,7 @@ const props = defineProps<{
 }>()
 
 const route = useRoute()
+const router = useRouter()
 
 const btPath = route.query.path as string
 const btDate = route.query.date as string
@@ -220,7 +221,19 @@ function renderChart() {
   const dates = equityData.value.map(p => p.date)
   const equity = equityData.value.map(p => p.equity)
 
+  // Calculate drawdown from peak equity
+  let peak = equity[0]
+  const drawdown: number[] = []
+  for (const e of equity) {
+    if (e > peak) peak = e
+    drawdown.push(peak > 0 ? ((e - peak) / peak) * 100 : 0)
+  }
+
+  const hasPrice = priceData.value.length > 0
+
+  // --- Traces ---
   const traces: Data[] = [
+    // Equity curve (top subplot, yaxis: 'y')
     {
       x: dates,
       y: equity,
@@ -232,44 +245,97 @@ function renderChart() {
       fill: 'tozeroy',
       fillcolor: 'rgba(59, 130, 246, 0.08)',
     },
+    // Drawdown (bottom subplot, yaxis: 'y3')
+    {
+      x: dates,
+      y: drawdown,
+      name: 'Drawdown',
+      type: 'scatter',
+      mode: 'lines',
+      line: { color: '#ef4444', width: 1.5 },
+      yaxis: 'y3',
+      fill: 'tozeroy',
+      fillcolor: 'rgba(239, 68, 68, 0.15)',
+    },
   ]
 
-  if (priceData.value.length > 0) {
-    const priceDates = priceData.value.map(p => p.date)
-    const priceCloses = priceData.value.map(p => p.close)
+  if (hasPrice) {
     traces.push({
-      x: priceDates,
-      y: priceCloses,
+      x: priceData.value.map(p => p.date),
+      y: priceData.value.map(p => p.close),
       name: 'Price',
       type: 'scatter',
       mode: 'lines',
-      line: { color: '#f59e0b', width: 1.5, dash: 'dot' },
+      line: { color: '#9ca3af', width: 1 },
       yaxis: 'y2',
     })
   }
 
-  const layout: Partial<Layout> = {
-    title: { text: 'Equity Curve & Price', font: { size: 16 } },
-    height: 400,
-    margin: { l: 70, r: 70, t: 40, b: 50 },
-    xaxis: { title: 'Date', type: 'date' },
-    yaxis: {
-      title: 'Equity',
-      side: 'left',
-      gridcolor: '#f0f0f0',
-    },
-    ...(priceData.value.length > 0 ? {
-      yaxis2: {
+  // --- Layout: 2-row subplot ---
+  // Row 1: Equity (y) + Price (y2) — shared xaxis
+  // Row 2: Drawdown (y3) — xaxis2 linked to xaxis
+  const y2Config: Record<string, unknown> = hasPrice
+    ? {
         title: 'Price',
         side: 'right',
         overlaying: 'y',
         gridcolor: '#fef3c7',
-      },
-    } : {}),
+      }
+    : {}
+
+  const layout: Partial<Layout> = {
+    title: { text: 'Equity Curve & Drawdown', font: { size: 16 } },
+    height: 560,
+    margin: { l: 70, r: 70, t: 40, b: 50 },
+    grid: {
+      rows: 2,
+      columns: 1,
+      pattern: 'independent',
+      roworder: 'top to bottom',
+    },
+    // Top subplot x/y
+    xaxis: {
+      type: 'date',
+      rangeslider: { visible: false },
+    },
+    yaxis: {
+      title: 'Equity',
+      side: 'left',
+      gridcolor: '#f0f0f0',
+      domain: [0.28, 1],
+    },
+    // Price on right of top subplot
+    yaxis2: {
+      ...y2Config,
+      domain: [0.28, 1],
+    },
+    // Bottom subplot: drawdown
+    xaxis2: {
+      type: 'date',
+      matches: 'x',
+    },
+    yaxis3: {
+      title: 'Drawdown %',
+      side: 'left',
+      gridcolor: '#fee2e2',
+      domain: [0, 0.22],
+      zeroline: true,
+      zerolinecolor: '#d1d5db',
+    },
     legend: { orientation: 'h', y: 1.12 },
+    dragmode: 'zoom',
+    hovermode: 'x unified',
   }
 
-  Plotly.newPlot(chartContainer.value, traces, layout, { responsive: true })
+  const config: Partial<Config> = {
+    responsive: true,
+    scrollZoom: true,
+    doubleClick: 'reset+autosize',
+    displaylogo: false,
+    modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+  }
+
+  Plotly.newPlot(chartContainer.value, traces, layout, config)
 }
 
 // ---- Formatting helpers ----
@@ -313,6 +379,10 @@ function fmtDuration(v: number | undefined | null): string {
   const min = Math.round(v / 60)
   if (min < 60) return `${min} 分钟`
   return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟`
+}
+
+function goBack() {
+  router.push({ path: '/', query: { tab: 'backtest' } })
 }
 
 onMounted(loadData)
@@ -371,7 +441,7 @@ onMounted(loadData)
 
 .chart-container {
   width: 100%;
-  min-height: 400px;
+  min-height: 560px;
 }
 
 .state {

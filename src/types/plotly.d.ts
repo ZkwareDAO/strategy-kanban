@@ -25,6 +25,9 @@ declare module 'plotly.js-dist-min' {
     title?: { text: string; font?: { size: number } }
     xaxis?: Record<string, unknown>
     yaxis?: Record<string, unknown>
+    xaxis2?: Record<string, unknown>
+    yaxis2?: Record<string, unknown>
+    yaxis3?: Record<string, unknown>
     grid?: {
       rows: number
       columns: number
@@ -39,6 +42,8 @@ declare module 'plotly.js-dist-min' {
     legend?: Record<string, unknown>
     dragmode?: 'pan' | 'zoom' | 'select' | 'lasso' | 'orbit' | 'turntable'
     hovermode?: 'x' | 'y' | 'closest' | 'x unified' | 'y unified' | false
+    shapes?: Array<Record<string, unknown>>
+    annotations?: Array<Record<string, unknown>>
   }
 
   export interface Config {

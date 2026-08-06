@@ -1,3 +1,7 @@
+# Local env files (contains sensitive URLs)
+.env
+.env.local
+
 # Logs
 logs
 *.log
