@@ -20,6 +20,18 @@ const router = createRouter({
       component: () => import('@/views/TokenDetailV2.vue'),
       props: true,
     },
+    {
+      path: '/backtest-detail/:strategy/:symbol',
+      name: 'BacktestDetail',
+      component: () => import('@/views/BacktestDetail.vue'),
+      props: true,
+    },
+    {
+      path: '/performance-detail/:strategyName',
+      name: 'PerformanceDetail',
+      component: () => import('@/views/PerformanceDetail.vue'),
+      props: true,
+    },
   ],
 })
 

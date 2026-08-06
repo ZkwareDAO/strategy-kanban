@@ -65,7 +65,7 @@
             >
               <div class="signal-id">{{ sig.signal_id || sig.live_signal_id }}</div>
               <div class="signal-info">
-                {{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} |
+                {{ formatTimeUtc8(sig) }} {{ signalLabel(sig) }} |
                 实盘: ${{ (sig.live_price || sig.price || 0).toLocaleString() }} |
                 回放: ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}
               </div>
@@ -89,7 +89,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.live_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ formatTimeUtc8(sig) }} {{ signalLabel(sig) }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.reason" class="signal-reason">{{ sig.reason }}</div>
             </div>
           </div>
@@ -105,7 +105,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.backtest_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ formatTimeUtc8(sig) }} {{ signalLabel(sig) }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.reason" class="signal-reason">{{ sig.reason }}</div>
             </div>
           </div>
@@ -124,7 +124,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.live_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ formatTimeUtc8(sig) }} {{ signalLabel(sig) }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.match_type" class="signal-badge matched">已匹配</div>
             </div>
           </div>
@@ -144,7 +144,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.backtest_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ formatTimeUtc8(sig) }} {{ signalLabel(sig) }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.match_type" class="signal-badge matched">已匹配</div>
             </div>
           </div>
@@ -164,7 +164,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.live_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ formatTimeUtc8(sig) }} {{ signalLabel(sig) }} | ${{ (sig.live_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.reason" class="signal-reason">{{ sig.reason }}</div>
             </div>
           </div>
@@ -180,7 +180,7 @@
               :class="sig.side"
             >
               <div class="signal-id">{{ sig.signal_id || sig.backtest_signal_id }}</div>
-              <div class="signal-info">{{ sig.timestamp || sig.time }} {{ signalLabel(sig) }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
+              <div class="signal-info">{{ formatTimeUtc8(sig) }} {{ signalLabel(sig) }} | ${{ (sig.backtest_price || sig.price || 0).toLocaleString() }}</div>
               <div v-if="sig.reason" class="signal-reason">{{ sig.reason }}</div>
             </div>
           </div>
@@ -217,6 +217,19 @@ function signalLabel(sig: Signal): string {
     default:
       return sig.side === 'buy' ? '开多' : '开空'
   }
+}
+
+/**
+ * 将信号时间转为 UTC+8 显示（仅影响显示，不改原始数据）。
+ * 如 2026-08-04T18:30:00+00:00 → 2026-08-05 02:30:00
+ */
+function formatTimeUtc8(sig: Signal): string {
+  const raw = sig.timestamp || sig.time || ''
+  if (!raw) return ''
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) return raw
+  d.setUTCHours(d.getUTCHours() + 8)
+  return d.toISOString().replace('T', ' ').slice(0, 19)
 }
 
 const accuracyPercent = computed(() => {

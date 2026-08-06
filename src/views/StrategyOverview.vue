@@ -20,10 +20,14 @@
     <el-tabs v-model="activeTab" class="mode-tabs">
       <el-tab-pane label="策略表格" name="strategy" />
       <el-tab-pane label="回测详情" name="backtest" />
+      <el-tab-pane label="策略表现" name="performance" />
     </el-tabs>
 
     <!-- 回测详情 -->
     <backtest-overview v-if="activeTab === 'backtest'" />
+
+    <!-- 策略表现 -->
+    <performance-overview v-else-if="activeTab === 'performance'" />
 
     <!-- 策略表格 -->
     <template v-else>
@@ -46,13 +50,14 @@ import { useStrategyStore } from '@/stores/strategy'
 import { useAppStore } from '@/stores/app'
 import StrategyList from '@/components/strategy/StrategyList.vue'
 import BacktestOverview from '@/components/BacktestOverview.vue'
+import PerformanceOverview from '@/components/PerformanceOverview.vue'
 
 const router = useRouter()
 const strategyStore = useStrategyStore()
 const appStore = useAppStore()
 
 const selectedDate = ref('')
-const activeTab = ref<'strategy' | 'backtest'>('strategy')
+const activeTab = ref<'strategy' | 'backtest' | 'performance'>('strategy')
 
 async function handleDateChange(date: string) {
   appStore.setDate(date)

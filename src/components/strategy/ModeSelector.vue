@@ -34,7 +34,7 @@ defineEmits<{
 }>()
 
 const modes = [
-  { value: 'live' as const, label: 'Live' },
+  { value: 'live' as const, label: 'Product' },
   { value: 'paper_trading' as const, label: 'Paper' },
   { value: 'smoking' as const, label: 'Smoking' },
 ]

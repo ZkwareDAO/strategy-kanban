@@ -101,7 +101,7 @@ function getRuntimeName(strategy: string, symbol: string): string {
 // 格式化模式显示
 function formatMode(mode: TradingMode): string {
   const modeMap: Record<TradingMode, string> = {
-    live: 'Live',
+    live: 'Product',
     paper_trading: 'Paper',
     smoking: 'Smoking'
   }

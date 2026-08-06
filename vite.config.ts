@@ -155,6 +155,12 @@ export default defineConfig({
   server: {
     host: true,
     port: 3000,
+    proxy: {
+      '/api/position': {
+        target: 'https://api.zkware.cn',
+        changeOrigin: true,
+      },
+    },
     watch: {
       // public/ 下的 data / kline-data / backtest-output 是指向外部数据目录的符号链接，
       // 体量巨大且为静态数据（无需 HMR）。关闭符号链接跟随以免耗尽 inotify (ENOSPC)。
