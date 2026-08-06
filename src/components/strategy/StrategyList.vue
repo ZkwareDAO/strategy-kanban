@@ -1,5 +1,18 @@
 <template>
   <div class="strategy-list">
+    <!-- Toolbar: 日期选择 -->
+    <div class="toolbar">
+      <el-date-picker
+        :model-value="selectedDate"
+        type="date"
+        placeholder="选择日期"
+        format="YYYY-MM-DD"
+        value-format="YYYYMMDD"
+        @update:model-value="$emit('date-change', $event)"
+      />
+      <span class="row-count">{{ summaries.length }} 条策略</span>
+    </div>
+
     <!-- Header -->
     <div class="strategy-header">
       <div class="col-name">策略名称</div>
@@ -47,10 +60,12 @@ const props = defineProps<{
   summaries: StrategySummary[]
   runtimes: Runtime[]
   positions: Record<string, Position[]>
+  selectedDate: string
 }>()
 
 defineEmits<{
   'view-position': [runtimeName: string, symbol: string]
+  'date-change': [date: string]
 }>()
 
 // 获取策略对应的所有代币及其交易模式（包括无仓位的）
@@ -115,6 +130,19 @@ function formatMode(mode: TradingMode): string {
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.row-count {
+  font-size: 13px;
+  color: #9ca3af;
 }
 
 .strategy-header {

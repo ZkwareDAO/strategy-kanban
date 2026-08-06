@@ -3,22 +3,11 @@
     <!-- Header -->
     <div class="header">
       <h1>交易复盘系统</h1>
-      <div v-if="activeTab === 'strategy'" class="date-picker">
-        <label>日期:</label>
-        <el-date-picker
-          v-model="selectedDate"
-          type="date"
-          placeholder="选择日期"
-          format="YYYY-MM-DD"
-          value-format="YYYYMMDD"
-          @change="handleDateChange"
-        />
-      </div>
     </div>
 
     <!-- 模式切换 -->
     <el-tabs v-model="activeTab" class="mode-tabs">
-      <el-tab-pane label="策略表格" name="strategy" />
+      <el-tab-pane label="实盘表现" name="strategy" />
       <el-tab-pane label="回测详情" name="backtest" />
       <el-tab-pane label="策略表现" name="performance" />
     </el-tabs>
@@ -37,7 +26,9 @@
         :summaries="strategyStore.strategySummaries"
         :runtimes="strategyStore.runtimes"
         :positions="strategyStore.positions"
+        :selected-date="selectedDate"
         @view-position="handleViewPosition"
+        @date-change="handleDateChange"
       />
     </template>
   </div>
@@ -129,17 +120,6 @@ onMounted(async () => {
     font-weight: 700;
     color: #1a1a1a;
     letter-spacing: 1px;
-  }
-}
-
-.date-picker {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-
-  label {
-    font-size: 14px;
-    color: #6b7280;
   }
 }
 
