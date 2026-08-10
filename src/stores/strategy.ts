@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Runtime, StrategySummary, ModeCounts } from '@/models/runtime'
+import type { Runtime, StrategySummary, ModeCounts, TradingMode } from '@/models/runtime'
 import type { Position } from '@/models/position'
 import { getRuntimes, getPositions } from '@/api/strategy'
 
@@ -7,8 +7,7 @@ export const useStrategyStore = defineStore('strategy', {
   state: () => ({
     runtimes: [] as Runtime[],
     positions: {} as Record<string, Position[]>,
-    fetchedRuntimes: new Set<string>(), // 记录已尝试 fetch 的 runtime
-    selectedMode: '' as 'live' | 'paper_trading' | 'smoking' | '', // 默认显示所有模式
+    selectedMode: '' as TradingMode | '',
     loading: false,
     error: null as string | null,
   }),
@@ -21,18 +20,17 @@ export const useStrategyStore = defineStore('strategy', {
       return state.runtimes.filter((r) => r.trading_mode === state.selectedMode)
     },
 
-    modeCounts: (state): ModeCounts => {
-      return {
-        live: state.runtimes.filter((r) => r.trading_mode === 'live').length,
-        paper_trading: state.runtimes.filter((r) => r.trading_mode === 'paper_trading').length,
-        smoking: state.runtimes.filter((r) => r.trading_mode === 'smoking').length,
+    modeCounts(state): ModeCounts {
+      const counts: ModeCounts = { live: 0, paper_trading: 0, smoking: 0, unknown: 0 }
+      for (const r of state.runtimes) {
+        counts[r.trading_mode] += 1
       }
+      return counts
     },
 
     strategySummaries(): StrategySummary[] {
       const strategyMap = new Map<string, { runtimes: Runtime[]; positions: Position[] }>()
 
-      // Group runtimes by strategy (only filtered ones)
       for (const runtime of this.filteredRuntimes) {
         if (!strategyMap.has(runtime.strategy)) {
           strategyMap.set(runtime.strategy, { runtimes: [], positions: [] })
@@ -40,8 +38,7 @@ export const useStrategyStore = defineStore('strategy', {
         strategyMap.get(runtime.strategy)!.runtimes.push(runtime)
       }
 
-      // Collect positions for each strategy
-      for (const [strategy, data] of strategyMap) {
+      for (const [, data] of strategyMap) {
         for (const runtime of data.runtimes) {
           const positions = this.positions[runtime.runtime_name]
           if (positions && positions.length > 0) {
@@ -50,24 +47,22 @@ export const useStrategyStore = defineStore('strategy', {
         }
       }
 
-      // Compute summaries - 包含所有策略（包括无仓位的）
       const summaries: StrategySummary[] = []
       for (const [strategy, data] of strategyMap) {
         const positions = data.positions
         const displayName = data.runtimes[0]?.display_name || strategy
 
+        const completedPositions = positions.filter(p => p.exit_time != null)
         const avgRoi =
-          positions.length > 0
-            ? positions.reduce((sum, p) => sum + p.realized_pnl, 0) / positions.length
+          completedPositions.length > 0
+            ? completedPositions.reduce((sum, p) => sum + (p.realized_pnl ?? 0), 0) / completedPositions.length
             : 0
 
-        // 计算胜率：盈利仓位数 / 总仓位数
-        const winCount = positions.filter(p => p.realized_pnl > 0).length
-        const winRate = positions.length > 0 ? (winCount / positions.length) * 100 : 0
+        const winCount = completedPositions.filter(p => (p.realized_pnl ?? 0) > 0).length
+        const winRate = completedPositions.length > 0 ? (winCount / completedPositions.length) * 100 : 0
 
-        // 计算已完成和未完成交易数
-        const completedCount = positions.filter(p => p.exit_time).length
-        const holdingCount = positions.filter(p => !p.exit_time).length
+        const completedCount = completedPositions.length
+        const holdingCount = positions.filter(p => p.exit_time == null).length
 
         summaries.push({
           strategy,
@@ -89,17 +84,13 @@ export const useStrategyStore = defineStore('strategy', {
       this.loading = true
       this.error = null
       try {
-        // 获取运行实例列表（合并 manifest + positions_index）
         const runtimes = await getRuntimes(date)
-
         this.runtimes = runtimes
         this.positions = {}
-        this.fetchedRuntimes = new Set<string>()
 
-        // 只对有实际数据的 runtime 加载持仓数据，避免大量 404 请求
-        const runtimesWithData = runtimes.filter(r => r.has_data)
+        // K线与仓位解耦：所有 runtime 都可点击，预加载仓位数据（空数组不影响）
         await Promise.all(
-          runtimesWithData.map(r => this.fetchPositions(r.runtime_name, date))
+          runtimes.map(r => this.fetchPositions(r.dir_name, r.symbol, date, r.runtime_name)),
         )
       } catch (err) {
         this.error = err instanceof Error ? err.message : 'Unknown error'
@@ -108,31 +99,19 @@ export const useStrategyStore = defineStore('strategy', {
       }
     },
 
-    async fetchPositions(runtimeName: string, date: string) {
-      this.fetchedRuntimes.add(runtimeName)
+    async fetchPositions(dirName: string, symbol: string, date: string, runtimeName: string) {
       try {
-        const positions = await getPositions(runtimeName, date)
-        // 只存储有实际数据的持仓，空数组不存储（保持 undefined）
+        const positions = await getPositions(dirName, symbol, date)
         if (positions.length > 0) {
           this.positions[runtimeName] = positions
         }
       } catch (err) {
-        console.error(`Failed to fetch positions for ${runtimeName}:`, err)
-        // 不设空数组，保持 undefined，避免空数组被当作"已加载"
+        console.error(`Failed to fetch positions for ${dirName}/${symbol}:`, err)
       }
     },
 
-    setMode(mode: 'live' | 'paper_trading' | 'smoking' | '') {
+    setMode(mode: TradingMode | '') {
       this.selectedMode = mode
     },
   },
 })
-
-/**
- * 从运行实例名称中提取交易模式
- */
-function extractMode(runtime_name: string): 'live' | 'paper_trading' | 'smoking' {
-  if (runtime_name.includes('_LIVE')) return 'live'
-  if (runtime_name.includes('_PAPER')) return 'paper_trading'
-  return 'smoking'
-}

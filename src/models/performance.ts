@@ -1,28 +1,19 @@
-/** API 原始订单仓位记录 */
+/** 策略表现 CSV 中的一条订单仓位记录（精简字段） */
 export interface OrderPosition {
-  id: number
+  /** 交易对，如 BTCUSDT */
   asset: string
+  /** 策略名，格式 {strategy_dir}_{SYMBOL}，如 NEWOBV_4H_1_BTCUSDT */
   strategy_name: string
-  exchange: string
-  side: number
-  pos_type: number       // 2=期货, 3=期权
-  quantity: number
-  pos_price: number
-  current_price: number
+  /** 仓位类型：2=期货 */
+  pos_type: number
+  /** 盈亏金额 */
   pnl_value: number
-  leverage: number
-  init_margin: number
-  pos_value: number
-  deleted: number        // 1=已平仓
-  created_at: string     // RFC3339 +08:00
-  close_time: string     // RFC3339 +08:00
-  updated_at: string
-  user_id: number
-  user_name: string
-  user_strategy_id: number
-  user_order_id: number
-  risk_control_strategy_id: number
-  uprunning_order_id: number
+  /** 是否已平仓：1=已平仓 */
+  deleted: number
+  /** 开仓时间（RFC 3339） */
+  created_at: string
+  /** 平仓时间（RFC 3339），持仓中为空 */
+  close_time: string | null
 }
 
 /** 策略维度汇总 */

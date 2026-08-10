@@ -1,7 +1,7 @@
 /**
  * v2 K线解析与持仓 overlay 工具
  *
- * 与 v1 (`src/utils/csv.ts` 的 parseKline) 的区别：
+ * 与 v1 K线解析 (`src/api/strategy.ts` 的 parseKline) 的区别：
  * - 输入是纯 OHLC CSV（无仓位字段），输出 [[RawKlinePoint]]
  * - 持仓通过 [[mergePositions]] 在数据加载层 overlay，产出 v1 形状的 [[KlinePoint]]，
  *   使 `resampleKline` 与指标逻辑无需改动即可复用
@@ -94,6 +94,18 @@ function padHM(hm: string): string {
   return `${(h ?? '').padStart(2, '0')}:${(m ?? '').padStart(2, '0')}`
 }
 
+/**
+ * 从 ISO 8601 时间字符串中提取 HH:MM
+ * 支持 '2026-08-06T16:45:00+00:00' 和 '2026-08-06 16:45:00' 两种分隔
+ * 无法解析时返回 null
+ */
+export function extractHm(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const sep = iso.includes('T') ? iso.indexOf('T') : iso.indexOf(' ')
+  if (sep < 0) return null
+  return iso.slice(sep + 1, sep + 6)
+}
+
 /** 构造中性（无持仓）KlinePoint，OHLC 保留 */
 function neutralKline(p: RawKlinePoint): KlinePoint {
   return {
@@ -126,21 +138,34 @@ function toExitInfo(pos: DatedPosition, exitPrice: number): ExitInfo {
     position_id: pos.position_id,
     position_type: pos.type,
     exit_price: exitPrice,
-    exit_time: pos.exit_time,
+    exit_time: pos.exit_time ?? undefined,
   }
+}
+
+/**
+ * 计算浮动收益率 (%)
+ */
+function floatingPnl(positionType: 'long' | 'short', entryPrice: number, currentPrice: number): number {
+  if (!entryPrice) return 0
+  if (positionType === 'long') {
+    return ((currentPrice - entryPrice) / entryPrice) * 100
+  }
+  return ((entryPrice - currentPrice) / entryPrice) * 100
 }
 
 /**
  * 将持仓 overlay 到 K线，产出 v1 形状的 [[KlinePoint]] 数组
  *
- * - 按 `${date} ${HH:MM}` 匹配开/平仓 bar
- * - 命中开仓 bar：is_entry=true，写入 position_id/entry_price/position_type 与 entries
- * - 命中平仓 bar：is_exit=true，写入 position_id/entry_price/position_type 与 exits
- * - 其余 bar：中性默认（position_id=''、pnl_pct=0），OHLC 不变
+ * - 按时间匹配开/平仓 bar
+ * - 开仓 bar：is_entry=true，写入 entries
+ * - 平仓 bar：is_exit=true，写入 exits，pnl_pct=已实现收益率
+ * - 持仓期间每根 bar：写入 position_id/entry_price/position_type，pnl_pct=按收盘价计算的浮动收益率
+ * - 其余 bar：中性默认，OHLC 不变
  *
  * 无持仓时返回全中性数组，保证 `resampleKline` 可直接消费。
  */
 export function mergePositions(kline: RawKlinePoint[], positions: DatedPosition[]): KlinePoint[] {
+  // 构建时间→持仓的映射
   const entryMap = new Map<string, DatedPosition[]>()
   const exitMap = new Map<string, DatedPosition[]>()
   const push = (map: Map<string, DatedPosition[]>, key: string, pos: DatedPosition) => {
@@ -149,11 +174,14 @@ export function mergePositions(kline: RawKlinePoint[], positions: DatedPosition[
     else map.set(key, [pos])
   }
   for (const pos of positions) {
-    push(entryMap, `${pos.date} ${padHM(pos.entry_time)}`, pos)
-    if (pos.exit_time) push(exitMap, `${pos.date} ${padHM(pos.exit_time)}`, pos)
+    const eHm = extractHm(pos.entry_time)
+    if (eHm) push(entryMap, `${pos.date} ${padHM(eHm)}`, pos)
+    const xHm = extractHm(pos.exit_time)
+    if (xHm) push(exitMap, `${pos.date} ${padHM(xHm)}`, pos)
   }
 
-  return kline.map(p => {
+  // 先构建基础数组，标记 entry/exit bar
+  const result = kline.map(p => {
     const neutral = neutralKline(p)
     const minuteKey = `${p.datetime.slice(0, 10)} ${p.datetime.slice(11, 16)}`
     const entries = entryMap.get(minuteKey)
@@ -165,7 +193,7 @@ export function mergePositions(kline: RawKlinePoint[], positions: DatedPosition[
         position_id: e.position_id,
         entry_price: e.entry_price,
         position_type: e.type,
-        pnl_pct: e.realized_pnl,
+        pnl_pct: 0,
         entries: entries.map(toEntryInfo),
       }
     }
@@ -178,10 +206,50 @@ export function mergePositions(kline: RawKlinePoint[], positions: DatedPosition[
         position_id: x.position_id,
         entry_price: x.entry_price,
         position_type: x.type,
-        pnl_pct: x.realized_pnl,
+        pnl_pct: x.realized_pnl ?? 0,
         exits: exits.map(pos => toExitInfo(pos, p.close)),
       }
     }
     return neutral
   })
+
+  // 第二遍：为每个持仓填充持仓期间的浮动 ROI
+  for (const pos of positions) {
+    // 找到开仓 bar（entry_time 为 null 的跨日仓位没有开仓标记）
+    let entryIdx = -1
+    for (let i = 0; i < result.length; i++) {
+      if (result[i].is_entry && result[i].position_id === pos.position_id) {
+        entryIdx = i
+        break
+      }
+    }
+
+    // 找到平仓 bar
+    let exitIdx = -1
+    for (let i = 0; i < result.length; i++) {
+      if (result[i].is_exit && result[i].position_id === pos.position_id) {
+        exitIdx = i
+        break
+      }
+    }
+
+    // 有开仓标记：从开仓 bar 开始；跨日仓位无开仓标记：从当天第一根 bar 开始
+    const startIdx = entryIdx >= 0 ? entryIdx : 0
+    const endIdx = exitIdx >= 0 ? exitIdx : result.length
+
+    // 填充持仓期间每根 bar 的浮动 ROI（平仓 bar 保留 realized_pnl）
+    for (let i = startIdx; i < endIdx; i++) {
+      const bar = result[i]
+      if (bar.is_exit && bar.position_id === pos.position_id) continue
+
+      if (!bar.position_id) {
+        bar.position_id = pos.position_id
+        bar.entry_price = pos.entry_price
+        bar.position_type = pos.type
+      }
+      bar.pnl_pct = floatingPnl(pos.type, pos.entry_price, kline[i].close)
+    }
+  }
+
+  return result
 }

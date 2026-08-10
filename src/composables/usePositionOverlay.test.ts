@@ -13,9 +13,11 @@ const kline: RawKlinePoint[] = [
 const p1 = {
   position_id: 'p1',
   type: 'long' as const,
-  entry_time: '00:15',
+  entry_time: '2026-07-27T00:15:00+00:00',
+  exit_time: null,
   entry_price: 100.5,
-  realized_pnl: 1,
+  exit_price: null,
+  realized_pnl: null,
   max_potential_pnl: 2,
   max_drawdown: -0.5,
 }

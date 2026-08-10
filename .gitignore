@@ -28,6 +28,7 @@ public/data
 public/kline-data
 public/backtest-output
 public/backtest-output-index.json
+public/frontend-data
 
 # Editor directories and files
 .vscode/*
@@ -49,5 +50,8 @@ Thumbs.db
 
 # Misc
 异常图片.png
+*.png
+-o
+skills-lock.json
 .agents/
 .claude/

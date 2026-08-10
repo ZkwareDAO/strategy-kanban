@@ -4,30 +4,19 @@
 
 /**
  * 回放交易记录
+ *
+ * 数据来源：frontend_data/{date}/{strategy}/{symbol}/backtest.json
+ * 仅保留前端展示所需字段，便于开源。
  */
 export interface BacktestTrade {
-  /** 交易ID */
-  trade_id: string
-  /** 策略ID */
-  strategy_id: string
-  /** 交易对 */
-  symbol: string
+  /** 时间戳（ISO 8601，如 2026-08-06T09:15:00） */
+  timestamp: string
   /** 方向: BUY, SELL, BUY_CLOSE, SELL_CLOSE */
   side: 'BUY' | 'SELL' | 'BUY_CLOSE' | 'SELL_CLOSE'
-  /** 数量 */
-  quantity: number
   /** 价格 */
   price: number
-  /** 手续费 */
-  commission: number
-  /** 滑点 */
-  slippage: number
   /** 盈亏 */
   pnl: number
-  /** 时间戳 */
-  timestamp: string
-  /** 备注 */
-  comment: string
 }
 
 /**

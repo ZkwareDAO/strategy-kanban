@@ -171,6 +171,7 @@ export default defineConfig(({ mode }) => {
           '**/public/data/**',
           '**/public/kline-data/**',
           '**/public/backtest-output/**',
+          '**/public/frontend-data/**',
         ],
       },
     }

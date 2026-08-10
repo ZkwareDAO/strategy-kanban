@@ -1,374 +1,233 @@
-import { load as yamlLoad } from 'js-yaml'
-import { parsePositionSummary, parseKline } from '@/utils/csv'
-import type { Runtime } from '@/models/runtime'
-import { mapRuntimeName, extractDisplayPrefix, PREFIX_STRATEGY_MAP } from '@/models/runtime'
+import { FRONTEND_DATA_BASE_URL } from '@/config/frontendData'
+import { extractDisplayPrefix } from '@/models/runtime'
+import type { Runtime, RuntimeStatus, TradingMode } from '@/models/runtime'
 import type { Position } from '@/models/position'
-import type { KlinePoint } from '@/models/kline'
 import type { SignalComparison } from '@/models/detail'
-import type { BacktestTrade, BacktestSignal } from '@/models/backtest'
+import type { BacktestTrade } from '@/models/backtest'
+import type { KlinePoint } from '@/models/kline'
+import { parseCsv } from '@/utils/csv'
 
-/**
- * 获取仓位数据索引
- * @param date 日期字符串
- * @returns 有数据的 runtime 列表
- */
-export async function getPositionsIndex(date: string): Promise<Runtime[]> {
-  try {
-    const response = await fetch(`/data/${date}/pnl/positions_index.json`)
-    if (!response.ok) {
-      return []
-    }
+// ────────────────────────────────────────────────────────────────────
+// manifest.json
+// ────────────────────────────────────────────────────────────────────
+interface ManifestEntry {
+  strategy: string
+  symbol: string
+  trading_mode: string
+  runtime_name: string
+  status: string
+  source_strategy: string
+}
 
-    const data = await response.json()
-    return data.runtimes.map((r: { runtime_name: string; strategy: string; symbol: string; trading_mode: string }) => ({
-      runtime_name: r.runtime_name,
-      strategy: r.strategy,
-      symbol: r.symbol,
-      trading_mode: r.trading_mode as 'live' | 'paper_trading' | 'smoking',
-      status: 'success' as const,
-      display_name: extractDisplayPrefix(r.runtime_name),
-      has_data: true,
-    }))
-  } catch (err) {
-    return []
+interface Manifest {
+  date: string
+  strategies: ManifestEntry[]
+}
+
+function normalizeTradingMode(raw: string): TradingMode {
+  switch (raw) {
+    case 'live': return 'live'
+    case 'paper':
+    case 'paper_trading': return 'paper_trading'
+    case 'smoking': return 'smoking'
+    default: return 'unknown'
   }
 }
 
+function normalizeStatus(raw: string): RuntimeStatus {
+  if (raw === 'success' || raw === 'failed') return raw
+  return 'unknown'
+}
+
 /**
- * 获取策略运行实例列表
- * 合并 manifest（所有策略）和 positions_index（有仓位的策略）
- * manifest 中的 runtime_name 会通过映射转换为实际目录名
- * @param date 日期字符串，如: '20260720'
- * @returns 运行实例数组
+ * 获取策略运行实例列表（来自 frontend_data 的 manifest.json）
+ *
+ * manifest 中的命名已由 Python 脚本统一为实盘真实名称，
+ * 因此前端不再需要 runtime_name 映射。
+ * @param date 日期字符串，如 '20260806'
  */
 export async function getRuntimes(date: string): Promise<Runtime[]> {
-  // 并行获取 manifest 和 positions_index
-  const [manifestRuntimes, positionsRuntimes] = await Promise.all([
-    getManifestRuntimes(date),
-    getPositionsIndex(date),
-  ])
-
-  // 用映射后的 runtime_name 去重合并
-  const seen = new Set<string>()
-  const merged: Runtime[] = []
-
-  // 先加入有仓位的数据（优先）
-  for (const r of positionsRuntimes) {
-    if (!seen.has(r.runtime_name)) {
-      seen.add(r.runtime_name)
-      merged.push(r)
-    }
-  }
-
-  // 再加入 manifest 中的（无仓位的策略）
-  for (const r of manifestRuntimes) {
-    if (!seen.has(r.runtime_name)) {
-      seen.add(r.runtime_name)
-      merged.push(r)
-    }
-  }
-
-  return merged
-}
-
-/**
- * 从 manifest.yaml 获取所有 runtime，并映射 runtime_name
- */
-async function getManifestRuntimes(date: string): Promise<Runtime[]> {
   try {
-    const response = await fetch(`/data/${date}/manifest.yaml`)
+    const response = await fetch(`${FRONTEND_DATA_BASE_URL}/${date}/manifest.json`)
     if (!response.ok) return []
-    const text = await response.text()
-    const data = yamlLoad(text) as { tasks: Array<{ runtime_name: string; strategy: string; symbol: string; status: string }> }
+    const manifest: Manifest = await response.json()
+    if (!manifest.strategies) return []
 
-    return data.tasks.map((task) => {
-      const mappedName = mapRuntimeName(task.runtime_name)
-      return {
-        runtime_name: mappedName,
-        strategy: task.strategy,
-        symbol: task.symbol,
-        trading_mode: extractMode(mappedName),
-        status: task.status as 'success' | 'failed',
-        display_name: extractDisplayPrefix(mappedName),
-        has_data: false,
-      }
-    })
+    const seen = new Set<string>()
+    const runtimes: Runtime[] = []
+
+    for (const entry of manifest.strategies) {
+      // 同一 (dir_name, symbol) 去重
+      const key = `${entry.strategy}/${entry.symbol}`
+      if (seen.has(key)) continue
+      seen.add(key)
+
+      runtimes.push({
+        runtime_name: entry.runtime_name,
+        dir_name: entry.strategy,
+        strategy: entry.source_strategy || entry.strategy,
+        symbol: entry.symbol,
+        trading_mode: normalizeTradingMode(entry.trading_mode),
+        status: normalizeStatus(entry.status),
+        display_name: extractDisplayPrefix(entry.runtime_name),
+      })
+    }
+
+    return runtimes
   } catch {
     return []
   }
 }
 
-/**
- * 扫描实际数据目录，获取有数据的 runtime 列表
- * 通过尝试获取目录下的 CSV 文件来判断
- * @param date 日期字符串
- * @param manifestRuntimes manifest 中的 runtime 列表（可选）
- * @returns runtime 名称数组
- */
-export async function scanDataDirectories(date: string, manifestRuntimes?: Runtime[]): Promise<string[]> {
-  // 如果提供了 manifest，检查哪些有实际数据
-  if (manifestRuntimes && manifestRuntimes.length > 0) {
-    const checks = await Promise.all(
-      manifestRuntimes.map(async r => {
-        try {
-          const response = await fetch(`/data/${date}/pnl/kline/${r.runtime_name}/${date}_summary_table.csv`)
-          return response.ok ? r.runtime_name : null
-        } catch {
-          return null
-        }
-      })
-    )
-    return checks.filter((r): r is string => r !== null)
-  }
-
-  // 否则返回空数组（无法扫描目录）
-  return []
-}
-
-/**
- * 从 runtime 名称解析策略信息
- * @param runtime_name 运行实例名称，如 'ICT_1D_4_BTCUSDT_LIVE'
- * @returns 策略名称和交易对
- */
-export function parseRuntimeName(runtime_name: string): { strategy: string; symbol: string } {
-  // 格式: STRATEGY_TIMEFRAME_VERSION_SYMBOL_MODE
-  // 例如: ICT_1D_4_BTCUSDT_LIVE -> strategy: cta_ict_v4, symbol: BTCUSDT
-  // 例如: NEWDOLPHIN_4H_1_ZECUSDT_SMOKING -> strategy: new_dolphin, symbol: ZECUSDT
-
-  const parts = runtime_name.split('_')
-
-  // 查找策略前缀（使用统一的映射表）
-  let strategyPrefix = parts[0]
-  for (const prefix of Object.keys(PREFIX_STRATEGY_MAP)) {
-    if (runtime_name.startsWith(prefix + '_') || runtime_name.startsWith(prefix)) {
-      strategyPrefix = prefix
-      break
-    }
-  }
-
-  const strategy = PREFIX_STRATEGY_MAP[strategyPrefix] || strategyPrefix.toLowerCase()
-
-  // SYMBOL 通常是倒数第二个部分（在 MODE 之前）
-  const symbolIndex = parts.length - 2
-  const symbol = parts[symbolIndex] || parts[parts.length - 1].replace('USDT', '') + 'USDT'
-
-  return { strategy, symbol }
-}
+// ────────────────────────────────────────────────────────────────────
+// positions.json
+// ────────────────────────────────────────────────────────────────────
 
 /**
  * 获取持仓数据
- * @param runtime_name 运行实例名称
- * @param date 日期字符串
- * @returns 持仓数组，如果文件不存在则返回空数组
+ * @param dirName frontend_data 下的策略目录名（如 DOLPHINV2_4H_2）
+ * @param symbol 交易对（如 BTCUSDT）
+ * @param date 日期字符串（如 20260806）
+ * @returns 持仓数组，文件不存在或无仓位时返回空数组
  */
-export async function getPositions(runtime_name: string, date: string): Promise<Position[]> {
+export async function getPositions(dirName: string, symbol: string, date: string): Promise<Position[]> {
   try {
-    const response = await fetch(`/data/${date}/pnl/kline/${runtime_name}/${date}_summary_table.csv`)
-    if (!response.ok) {
-      // 文件不存在，返回空数组
-      return []
-    }
-    const text = await response.text()
-    return parsePositionSummary(text)
-  } catch (err) {
-    // 请求失败，返回空数组
+    const response = await fetch(`${FRONTEND_DATA_BASE_URL}/${date}/${dirName}/${symbol}/positions.json`)
+    if (!response.ok) return []
+    const data: unknown = await response.json()
+    return parsePositions(data)
+  } catch {
     return []
   }
 }
 
-/**
- * 获取K线数据（价格与ROI趋势）
- * @param runtime_name 运行实例名称
- * @param date 日期字符串
- * @returns K线数据点数组
- */
-export async function getKline(runtime_name: string, date: string): Promise<KlinePoint[]> {
-  const response = await fetch(`/data/${date}/pnl/kline/${runtime_name}/${date}.csv`)
-  const text = await response.text()
-  return parseKline(text)
+function parsePositions(json: unknown): Position[] {
+  if (!Array.isArray(json)) return []
+  return json.flatMap((raw): Position[] => {
+    if (!raw || typeof raw !== 'object') return []
+    const r = raw as Record<string, unknown>
+    return [{
+      position_id: String(r.position_id ?? ''),
+      type: r.type === 'short' ? 'short' : 'long',
+      entry_time: r.entry_time == null ? null : String(r.entry_time),
+      exit_time: r.exit_time == null ? null : String(r.exit_time),
+      entry_price: toNumber(r.entry_price),
+      exit_price: r.exit_price == null ? null : toNumber(r.exit_price),
+      realized_pnl: r.realized_pnl == null ? null : toNumber(r.realized_pnl),
+      max_potential_pnl: toNumber(r.max_potential_pnl),
+      max_drawdown: toNumber(r.max_drawdown),
+    }]
+  })
 }
+
+// ────────────────────────────────────────────────────────────────────
+// backtest.json
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * 获取回放交易数据
+ * @param date 日期字符串（如 20260806）
+ * @param dirName 策略目录名（如 DOLPHINV2_4H_2）
+ * @param symbol 交易对（如 BTCUSDT）
+ * @returns 回放交易记录数组，无数据时返回空数组
+ */
+export async function getBacktestTrades(
+  date: string,
+  dirName: string,
+  symbol: string,
+): Promise<BacktestTrade[]> {
+  try {
+    const response = await fetch(`${FRONTEND_DATA_BASE_URL}/${date}/${dirName}/${symbol}/backtest.json`)
+    if (!response.ok) return []
+    const data: unknown = await response.json()
+    return parseBacktestTrades(data)
+  } catch {
+    return []
+  }
+}
+
+function parseBacktestTrades(json: unknown): BacktestTrade[] {
+  if (!Array.isArray(json)) return []
+  return json.flatMap((raw): BacktestTrade[] => {
+    if (!raw || typeof raw !== 'object') return []
+    const r = raw as Record<string, unknown>
+    return [{
+      timestamp: String(r.timestamp ?? ''),
+      side: String(r.side ?? 'BUY') as BacktestTrade['side'],
+      price: toNumber(r.price),
+      pnl: toNumber(r.pnl),
+    }]
+  })
+}
+
+// ────────────────────────────────────────────────────────────────────
+// comparison.json
+// ────────────────────────────────────────────────────────────────────
 
 /**
  * 获取信号对比数据
- * @param strategy 策略名称
- * @param symbol 代币符号
- * @param date 日期字符串
- * @returns 信号对比数据
+ * @param dirName 策略目录名（如 DOLPHINV2_4H_2）
+ * @param symbol 交易对（如 BTCUSDT）
+ * @param date 日期字符串（如 20260806）
  */
-export async function getComparison(strategy: string, symbol: string, date: string): Promise<SignalComparison> {
-  const response = await fetch(`/data/${date}/comparisons/${strategy}_${symbol}.json`)
+export async function getComparison(
+  dirName: string,
+  symbol: string,
+  date: string,
+): Promise<SignalComparison> {
+  const response = await fetch(`${FRONTEND_DATA_BASE_URL}/${date}/${dirName}/${symbol}/comparison.json`)
   if (!response.ok) {
     throw new Error(`Failed to fetch comparison: ${response.status}`)
   }
   return response.json()
 }
 
-/**
- * 回测索引条目
- */
-interface BacktestIndexEntry {
-  strategy: string
-  time: string // HHMMSS
-  date: string // YYYYMMDD
-  symbols: string[]
-}
+// ────────────────────────────────────────────────────────────────────
+// K线（v1 详情页仍使用 pnl/kline CSV，来自 signal_comparison_output）
+// ────────────────────────────────────────────────────────────────────
 
 /**
- * 回测索引文件结构
- */
-interface BacktestIndex {
-  runs: BacktestIndexEntry[]
-}
-
-/**
- * 获取回放交易数据
- * @param date 日期字符串
- * @param strategy 策略名称
- * @param symbol 代币符号
- * @returns 回放交易记录数组，如果文件不存在或无数据则返回空数组
- */
-export async function getBacktestTrades(date: string, strategy: string, symbol: string): Promise<BacktestTrade[]> {
-  try {
-    // 1. 尝试从索引文件定位
-    const indexPath = `/data/${date}/backtest_results/index.json`
-    const indexResponse = await fetch(indexPath)
-
-    if (indexResponse.ok) {
-      const index: BacktestIndex = await indexResponse.json()
-      const entry = index.runs.find(r => r.strategy === strategy && r.symbols.includes(symbol))
-
-      if (entry) {
-        const csvPath = `/data/${date}/backtest_results/${entry.strategy}/${entry.date}/${entry.time}/${symbol}/backtest_trades.csv`
-        const csvResponse = await fetch(csvPath)
-
-        if (csvResponse.ok) {
-          const text = await csvResponse.text()
-          const trades = parseBacktestTrades(text)
-          if (trades.length > 0) {
-            console.log('[getBacktestTrades] Found via index:', csvPath)
-            return trades
-          }
-        }
-      }
-    }
-
-    // 2. 索引不存在或未找到，尝试下一天的索引（数据存储在下一天的目录）
-    const nextDate = incrementDate(date)
-    const nextIndexPath = `/data/${date}/backtest_results/index.json`
-
-    // 如果当天索引失败，尝试从下一天的数据目录读取索引
-    // 注意：索引文件在 backtest_results 目录下，而不是日期目录下
-    const nextIndexResponse = await fetch(`/data/${nextDate}/backtest_results/index.json`).catch(() => null)
-
-    if (nextIndexResponse?.ok) {
-      const index: BacktestIndex = await nextIndexResponse.json()
-      const entry = index.runs.find(r => r.strategy === strategy && r.symbols.includes(symbol))
-
-      if (entry) {
-        const csvPath = `/data/${nextDate}/backtest_results/${entry.strategy}/${entry.date}/${entry.time}/${symbol}/backtest_trades.csv`
-        const csvResponse = await fetch(csvPath)
-
-        if (csvResponse.ok) {
-          const text = await csvResponse.text()
-          const trades = parseBacktestTrades(text)
-          if (trades.length > 0) {
-            console.log('[getBacktestTrades] Found via next date index:', csvPath)
-            return trades
-          }
-        }
-      }
-    }
-
-    console.log('[getBacktestTrades] No data found for', strategy, symbol, date)
-    return []
-  } catch (err) {
-    console.error('Failed to fetch backtest trades:', err)
-    return []
-  }
-}
-
-/**
- * 日期加一天
- * @param date 日期字符串 YYYYMMDD
- * @returns 下一天的日期字符串
- */
-function incrementDate(date: string): string {
-  const year = parseInt(date.slice(0, 4))
-  const month = parseInt(date.slice(4, 6))
-  const day = parseInt(date.slice(6, 8))
-
-  const d = new Date(year, month - 1, day)
-  d.setDate(d.getDate() + 1)
-
-  const nextYear = d.getFullYear()
-  const nextMonth = String(d.getMonth() + 1).padStart(2, '0')
-  const nextDay = String(d.getDate()).padStart(2, '0')
-
-  return `${nextYear}${nextMonth}${nextDay}`
-}
-
-/**
- * 解析回放交易 CSV 数据
- * @param text CSV 文本
- * @returns 回放交易记录数组
- */
-function parseBacktestTrades(text: string): BacktestTrade[] {
-  const lines = text.trim().split('\n')
-
-  // 如果只有列名（表头），返回空数组
-  if (lines.length <= 1) {
-    return []
-  }
-
-  const trades: BacktestTrade[] = []
-
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim()
-    if (!line) continue
-
-    const [
-      trade_id,
-      strategy_id,
-      symbol,
-      side,
-      quantity,
-      price,
-      commission,
-      slippage,
-      pnl,
-      timestamp,
-      comment
-    ] = line.split(',')
-
-    trades.push({
-      trade_id,
-      strategy_id,
-      symbol,
-      side: side as BacktestTrade['side'],
-      quantity: parseFloat(quantity),
-      price: parseFloat(price),
-      commission: parseFloat(commission),
-      slippage: parseFloat(slippage),
-      pnl: parseFloat(pnl),
-      timestamp,
-      comment
-    })
-  }
-
-  return trades
-}
-
-/**
- * 从运行实例名称中提取交易模式
+ * 获取K线数据（v1 详情页使用）
  * @param runtime_name 运行实例名称
- * @returns 交易模式
- * @example
- * extractMode('ICT_1D_4_BTCUSDT_LIVE') // 'live'
- * extractMode('RBREAKER_15M_3_BTCUSDT_PAPER') // 'paper_trading'
- * extractMode('TEST_BTCUSDT_SMOKING') // 'smoking'
+ * @param date 日期字符串
  */
-function extractMode(runtime_name: string): 'live' | 'paper_trading' | 'smoking' {
-  if (runtime_name.includes('_LIVE')) return 'live'
-  if (runtime_name.includes('_PAPER')) return 'paper_trading'
-  return 'smoking'
+export async function getKline(runtime_name: string, date: string): Promise<KlinePoint[]> {
+  try {
+    const response = await fetch(`/data/${date}/pnl/kline/${runtime_name}/${date}.csv`)
+    if (!response.ok) return []
+    const text = await response.text()
+    return parseKline(text)
+  } catch {
+    return []
+  }
+}
+
+function parseKline(csv: string): KlinePoint[] {
+  const rows = parseCsv(csv)
+  return rows
+    .filter((row) => row.timestamp && row.datetime)
+    .map((row) => ({
+      timestamp: parseInt(row.timestamp, 10),
+      datetime: row.datetime,
+      open: parseFloat(row.open) || 0,
+      high: parseFloat(row.high) || 0,
+      low: parseFloat(row.low) || 0,
+      close: parseFloat(row.close) || 0,
+      position_id: row.position_id || '',
+      entry_price: parseFloat(row.entry_price) || 0,
+      position_type: (row.position_type === 'short' ? 'short' : 'long') as 'long' | 'short',
+      pnl_pct: parseFloat(row.pnl_pct) || 0,
+      is_entry: row.is_entry === 'True',
+      is_exit: row.is_exit === 'True',
+    }))
+}
+
+// ────────────────────────────────────────────────────────────────────
+// helpers
+// ────────────────────────────────────────────────────────────────────
+
+function toNumber(value: unknown): number {
+  if (value == null || value === '') return 0
+  const n = Number(value)
+  return Number.isNaN(n) ? 0 : n
 }

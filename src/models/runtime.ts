@@ -3,21 +3,10 @@
  */
 
 /** 运行模式类型 */
-export type TradingMode = 'live' | 'paper_trading' | 'smoking'
+export type TradingMode = 'live' | 'paper_trading' | 'smoking' | 'unknown'
 
 /** 运行状态类型 */
-export type RuntimeStatus = 'success' | 'failed'
-
-/**
- * Manifest runtime 前缀 → 实际数据目录前缀 映射
- * 仅用于同一策略的前缀缩写（manifest 用全称，实际目录用缩写）
- * 不同版本的策略不应映射（如 DOLPHIN 和 DOLPHINV2 是两个不同策略）
- */
-export const RUNTIME_PREFIX_MAP: Record<string, string> = {
-  'EMARSIPULLBACK': 'ERP',
-  'REGIMEDONCHIANATR': 'RDATR',
-  'VWAPCHANNELMOMENTUM': 'VWAPMOM',
-}
+export type RuntimeStatus = 'success' | 'failed' | 'unknown'
 
 /**
  * 实际数据目录前缀 → 策略名 映射
@@ -33,23 +22,11 @@ export const PREFIX_STRATEGY_MAP: Record<string, string> = {
   'ERP': 'ema_rsi_pullback',
   'RDATR': 'regime_donchian_atr',
   'VWAPMOM': 'vwap_channel_momentum',
+  'SAR_SNT3_V3': 'sar_snt3_v3',
 }
 
 /**
- * 将 manifest runtime_name 转换为实际数据目录的 runtime_name
- * 例如: DOLPHIN_4H_2_BTCUSDT_LIVE → DOLPHINV2_4H_2_BTCUSDT_LIVE
- */
-export function mapRuntimeName(runtimeName: string): string {
-  for (const [manifestPrefix, actualPrefix] of Object.entries(RUNTIME_PREFIX_MAP)) {
-    if (runtimeName.startsWith(manifestPrefix + '_')) {
-      return actualPrefix + runtimeName.slice(manifestPrefix.length)
-    }
-  }
-  return runtimeName
-}
-
-/**
- * 从 runtime_name 提取显示用的策略短名（映射后的前缀）
+ * 从 runtime_name 提取显示用的策略短名
  * 例如: VWAPMOM_15M_1_XLMUSDT_SMOKING → VWAPMOM
  *       DOLPHINV2_4H_2_BTCUSDT_LIVE → DOLPHINV2
  */
@@ -66,17 +43,20 @@ export function extractDisplayPrefix(runtimeName: string): string {
  * 策略运行实例
  * @example
  * const runtime: Runtime = {
- *   runtime_name: 'ICT_1D_4_BTCUSDT_LIVE',
- *   strategy: 'cta_ict_v4',
+ *   runtime_name: 'DOLPHINV2_4H_2_BTCUSDT_LIVE',
+ *   dir_name: 'DOLPHINV2_4H_2',
+ *   strategy: 'dolphin_trading_v2',
  *   symbol: 'BTCUSDT',
  *   trading_mode: 'live',
  *   status: 'success'
  * }
  */
 export interface Runtime {
-  /** 运行实例名称，如: ICT_1D_4_BTCUSDT_LIVE */
+  /** 运行实例名称，如: DOLPHINV2_4H_2_BTCUSDT_LIVE */
   runtime_name: string
-  /** 策略名称，如: cta_ict_v4 */
+  /** frontend_data 下的策略目录名（如 DOLPHINV2_4H_2） */
+  dir_name: string
+  /** 策略内部名（source_strategy），如: dolphin_trading_v2 */
   strategy: string
   /** 交易对，如: BTCUSDT */
   symbol: string
@@ -84,23 +64,12 @@ export interface Runtime {
   trading_mode: TradingMode
   /** 运行状态 */
   status: RuntimeStatus
-  /** 显示用策略短名（映射后的前缀），如: VWAPMOM, DOLPHINV2 */
+  /** 显示用策略短名，如: DOLPHINV2 */
   display_name: string
-  /** 是否有实际仓位数据（来自 positions_index） */
-  has_data: boolean
 }
 
 /**
  * 策略汇总信息
- * @example
- * const summary: StrategySummary = {
- *   strategy: 'cta_ict_v4',
- *   position_count: 4,
- *   completed_count: 2,
- *   holding_count: 1,
- *   win_rate: 75.0,
- *   avg_roi: 2.35
- * }
  */
 export interface StrategySummary {
   /** 策略名称 */
@@ -126,4 +95,5 @@ export interface ModeCounts {
   live: number
   paper_trading: number
   smoking: number
+  unknown: number
 }
