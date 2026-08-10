@@ -14,9 +14,35 @@
           <span v-if="runtimeName"> | 运行实例: {{ runtimeName }}</span>
           <span v-else class="muted"> | 纯K线模式（无仓位叠加）</span>
         </p>
-        <el-tag :type="runtimeName ? 'success' : 'info'">
-          {{ runtimeName ? '含仓位叠加' : '仅K线' }}
-        </el-tag>
+        <el-tag :type="modeTagType">{{ modeLabel }}</el-tag>
+      </div>
+
+      <!-- Strategy Logic Inline -->
+      <div class="strategy-logic-inline">
+        <div class="logic-toggle" @click="logicExpanded = !logicExpanded">
+          <span class="logic-label">策略逻辑:</span>
+          <button class="btn-toggle-inline">{{ logicExpanded ? '[收起 ▲]' : '[展开 ▼]' }}</button>
+        </div>
+        <div v-show="logicExpanded" class="logic-content-inline">
+          <div class="logic-section-inline">
+            <div class="logic-title-inline">【开仓条件】</div>
+            <ul>
+              <li v-for="(rule, idx) in strategyLogic.entry_conditions.rules" :key="idx">{{ rule }}</li>
+            </ul>
+          </div>
+          <div class="logic-section-inline">
+            <div class="logic-title-inline">【平仓条件】</div>
+            <ul>
+              <li v-for="(rule, idx) in strategyLogic.exit_conditions.rules" :key="idx">{{ rule }}</li>
+            </ul>
+          </div>
+          <div class="logic-section-inline">
+            <div class="logic-title-inline">【风控】</div>
+            <ul>
+              <li v-for="(rule, idx) in strategyLogic.risk_management.rules" :key="idx">{{ rule }}</li>
+            </ul>
+          </div>
+        </div>
       </div>
 
       <!-- 日期范围选择（默认单日，可选多日） -->
@@ -39,7 +65,7 @@
       <div class="chart-controls">
         <div class="backplay-toggle">
           <label class="checkbox-label">
-            <input type="checkbox" v-model="showBackplay" :disabled="!runtimeName" />
+            <input type="checkbox" v-model="showBackplay" :disabled="!dirName" />
             <span>回放对比</span>
           </label>
           <span v-if="backplayLoading" class="backplay-status">加载中...</span>
@@ -48,7 +74,7 @@
             {{ backplayTrades.length }} 条回放信号
           </span>
         </div>
-        <IndicatorPanel v-model="selectedIndicators" />
+        <IndicatorPanel v-model="selectedIndicators" :strategy="strategyPrefix" />
       </div>
 
       <TimeframeSelector v-model="selectedTimeframe" v-model:display-count="displayCount" />
@@ -65,23 +91,20 @@
         :backplay-signals="showBackplay ? backplaySignals : undefined"
         @entry-click="handleEntryClick"
         @exit-click="handleExitClick"
+        @bar-click="handleBarClick"
       />
 
-      <!-- 仓位详情弹框（v2 无每 bar 的 pnl_pct，改用持仓字段展示，避免误导性的空 ROI 曲线） -->
-      <el-dialog v-model="entryDialogVisible" :title="entryDialogTitle" width="60%" top="10vh">
-        <div v-if="clickedPosition" class="position-detail">
-          <div class="detail-row"><span>仓位ID:</span><code>{{ clickedPosition.position_id }}</code></div>
-          <div class="detail-row"><span>方向:</span>{{ clickedPosition.type === 'long' ? '做多' : '做空' }}</div>
-          <div class="detail-row"><span>开仓时间:</span>{{ clickedPosition.date }} {{ clickedPosition.entry_time }}</div>
-          <div class="detail-row"><span>开仓价:</span>{{ clickedPosition.entry_price.toFixed(2) }}</div>
-          <div v-if="clickedPosition.exit_time" class="detail-row">
-            <span>平仓时间:</span>{{ clickedPosition.date }} {{ clickedPosition.exit_time }}
-          </div>
-          <div class="detail-row"><span>实现收益率:</span>{{ clickedPosition.realized_pnl.toFixed(2) }}%</div>
-          <div class="detail-row"><span>最大潜在收益:</span>{{ clickedPosition.max_potential_pnl.toFixed(2) }}%</div>
-          <div class="detail-row"><span>最大回撤:</span>{{ clickedPosition.max_drawdown.toFixed(2) }}%</div>
-        </div>
+      <!-- 仓位详情弹框 -->
+      <el-dialog v-model="entryDialogVisible" :title="entryDialogTitle" width="90%" top="5vh">
+        <PriceRoiChart
+          v-if="entryDialogVisible"
+          :timeline-data="mergedKline"
+          :highlight-position-id="highlightPositionId"
+        />
       </el-dialog>
+
+      <!-- 实盘与回放信号对比 -->
+      <ComparisonReport :comparison="comparisonData" />
     </template>
   </div>
 </template>
@@ -89,7 +112,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { getPositions, getBacktestTrades } from '@/api/strategy'
+import { getPositions, getBacktestTrades, getComparison } from '@/api/strategy'
 import { getKlineV2 } from '@/api/klineV2'
 import { usePositionOverlay, toDatedPositions } from '@/composables/usePositionOverlay'
 import { resampleKline, getDefaultDisplayCount } from '@/utils/resample'
@@ -102,12 +125,44 @@ import type { BacktestSignal } from '@/models/backtest'
 import TechnicalChart from '@/components/detail/TechnicalChart.vue'
 import IndicatorPanel from '@/components/detail/IndicatorPanel.vue'
 import TimeframeSelector from '@/components/detail/TimeframeSelector.vue'
+import PriceRoiChart from '@/components/detail/PriceRoiChart.vue'
+import ComparisonReport from '@/components/detail/ComparisonReport.vue'
+import type { SignalComparison, StrategyLogic as StrategyLogicType } from '@/models/detail'
+import { getStrategyConfigByDir, type StrategyConfig } from '@/config/strategies'
 
 const props = defineProps<{ strategy: string; symbol: string }>()
 const route = useRoute()
 
 /** 运行实例名（可选）。存在则按日叠加仓位；缺失则为纯K线模式 */
 const runtimeName = computed(() => (route.query.runtime as string) ?? '')
+/** frontend_data 下的策略目录名（如 DOLPHINV2_4H_2），从 query.dir 读取 */
+const dirName = computed(() => (route.query.dir as string) ?? '')
+
+const tradingMode = computed(() => {
+  const name = (runtimeName.value || '').toUpperCase()
+  if (name.includes('_LIVE') || name.endsWith('LIVE')) return 'live'
+  if (name.includes('_PAPER') || name.endsWith('PAPER')) return 'paper_trading'
+  if (name.includes('_SMOKING') || name.endsWith('SMOKING')) return 'smoking'
+  return ''
+})
+
+const modeLabel = computed(() => {
+  const map: Record<string, string> = {
+    live: '实盘',
+    paper_trading: '模拟盘',
+    smoking: '冒烟测试',
+  }
+  return map[tradingMode.value] ?? ''
+})
+
+const modeTagType = computed(() => {
+  const map: Record<string, string> = {
+    live: 'danger',
+    paper_trading: 'warning',
+    smoking: 'info',
+  }
+  return (map[tradingMode.value] ?? 'info') as 'danger' | 'warning' | 'info'
+})
 
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -123,7 +178,28 @@ const backplayTrades = ref<BacktestSignal[]>([])
 
 const entryDialogVisible = ref(false)
 const entryDialogTitle = ref('')
-const clickedPosition = ref<DatedPosition | null>(null)
+const highlightPositionId = ref('')
+const comparisonData = ref<SignalComparison | undefined>(undefined)
+const logicExpanded = ref(false)
+
+// 策略配置与逻辑（复用 v1 的策略配置查找）
+const strategyConfig = computed<StrategyConfig | null>(() => getStrategyConfigByDir(props.strategy))
+const strategyPrefix = computed(() => strategyConfig.value?.strategy_prefix ?? '')
+const strategyLogic = computed<StrategyLogicType>(() => {
+  const config = strategyConfig.value
+  if (config) {
+    return {
+      entry_conditions: { title: '入场条件', rules: config.logic.entry },
+      exit_conditions: { title: '出场条件', rules: config.logic.exit },
+      risk_management: { title: '风控规则', rules: config.logic.risk },
+    }
+  }
+  return {
+    entry_conditions: { title: '入场条件', rules: ['策略逻辑未配置，请查看策略代码'] },
+    exit_conditions: { title: '出场条件', rules: ['策略逻辑未配置，请查看策略代码'] },
+    risk_management: { title: '风控规则', rules: ['策略逻辑未配置，请查看策略代码'] },
+  }
+})
 
 // ---- 日期范围（ISO YYYY-MM-DD）----
 function yyyymmddToIso(s: string): string {
@@ -154,17 +230,15 @@ const processedKlineData = computed<KlinePoint[]>(() => {
   return resampleKline(mergedKline.value, selectedTimeframe.value)
 })
 
-const hasPositions = computed(() => datedPositions.value.length > 0)
 const emptyData = computed(() => !loading.value && !error.value && rawKline.value.length === 0)
 
 /**
- * 纯K线模式：展示全部 bar（让用户看到完整区间）；
- * 含仓位模式：沿用 v1 的 displayCount（以首开仓点为中心），并按数据量上限截断。
+ * 实际显示的 K 线数量：始终尊重用户选择的 displayCount，
+ * 但不超过当前数据总量。
  */
 const effectiveDisplayCount = computed(() => {
   const n = processedKlineData.value.length
   if (n === 0) return displayCount.value
-  if (!hasPositions.value) return n
   return Math.min(displayCount.value, n)
 })
 
@@ -182,28 +256,44 @@ watch(selectedTimeframe, (tf) => {
   displayCount.value = getDefaultDisplayCount(tf)
 }, { immediate: true })
 
-// ---- 点击交互：按 position_id 查找持仓并展开详情 ----
-function findPosition(positionId: string): DatedPosition | null {
-  return datedPositions.value.find(p => p.position_id === positionId) ?? null
-}
+// 根据策略配置设置默认指标
+watch(strategyConfig, (config) => {
+  if (config) {
+    const implemented = config.indicators.filter(
+      (i): i is IndicatorType => ['RSI', 'MACD', 'ATR', 'EMA', 'BOLL', 'KD', 'ADX', 'OBV', 'Donchian', 'Envelope', 'SMA'].includes(i)
+    )
+    if (implemented.length > 0) {
+      selectedIndicators.value = implemented
+      return
+    }
+  }
+  selectedIndicators.value = ['RSI', 'MACD', 'ATR']
+}, { immediate: true })
+
+// ---- 点击交互：展开价格与 ROI 趋势图 ----
 function handleEntryClick(entry: { position_id: string; position_type: string; entry_price: number; datetime: string }) {
-  clickedPosition.value = findPosition(entry.position_id)
+  highlightPositionId.value = entry.position_id
   entryDialogTitle.value = `${entry.position_type === 'long' ? '做多' : '做空'}开仓 - $${entry.entry_price.toFixed(2)} - ${entry.datetime}`
   entryDialogVisible.value = true
 }
 function handleExitClick(exit: { position_id: string; position_type: string; exit_price: number; datetime: string }) {
-  clickedPosition.value = findPosition(exit.position_id)
+  highlightPositionId.value = exit.position_id
   entryDialogTitle.value = `${exit.position_type === 'long' ? '做多' : '做空'}平仓 - $${exit.exit_price.toFixed(2)} - ${exit.datetime}`
+  entryDialogVisible.value = true
+}
+function handleBarClick(bar: { datetime: string; open: number; high: number; low: number; close: number }) {
+  highlightPositionId.value = ''
+  entryDialogTitle.value = `K线 - ${bar.datetime}`
   entryDialogVisible.value = true
 }
 
 // ---- 数据加载 ----
 async function fetchPositionsForRange(dates: string[]): Promise<DatedPosition[]> {
-  if (!runtimeName.value || dates.length === 0) return []
+  if (!dirName.value || dates.length === 0) return []
   const results = await Promise.all(
     dates.map(async (iso) => {
       try {
-        const positions = await getPositions(runtimeName.value, isoToYyyymmdd(iso))
+        const positions = await getPositions(dirName.value, props.symbol, isoToYyyymmdd(iso))
         return toDatedPositions(positions, iso)
       } catch {
         return [] as DatedPosition[]
@@ -211,6 +301,21 @@ async function fetchPositionsForRange(dates: string[]): Promise<DatedPosition[]>
     }),
   )
   return results.flat()
+}
+
+/** 获取日期范围内第一个可用的 comparison.json */
+async function fetchComparisonForRange(dates: string[]): Promise<void> {
+  if (!dirName.value) return
+  for (const iso of dates) {
+    try {
+      const data = await getComparison(dirName.value, props.symbol, isoToYyyymmdd(iso))
+      comparisonData.value = data
+      return
+    } catch {
+      // try next date
+    }
+  }
+  comparisonData.value = undefined
 }
 
 async function fetchData() {
@@ -222,6 +327,7 @@ async function fetchData() {
   const [start, end] = dateRange.value
   loading.value = true
   error.value = null
+  comparisonData.value = undefined
   try {
     const dates = enumerateDates(start, end)
     const [kline, positions] = await Promise.all([
@@ -230,6 +336,8 @@ async function fetchData() {
     ])
     rawKline.value = kline
     datedPositions.value = positions
+    // 对比数据取日期范围内第一个可用的
+    fetchComparisonForRange(dates)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载失败'
     rawKline.value = []
@@ -243,10 +351,14 @@ async function fetchBackplayData() {
   if (!dateRange.value) return
   backplayLoading.value = true
   try {
+    if (!dirName.value) {
+      backplayTrades.value = []
+      return
+    }
     const dates = enumerateDates(dateRange.value[0], dateRange.value[1])
     const tradesPerDay = await Promise.all(
       dates.map((iso) =>
-        getBacktestTrades(isoToYyyymmdd(iso), props.strategy, props.symbol).catch(() => []),
+        getBacktestTrades(isoToYyyymmdd(iso), dirName.value, props.symbol).catch(() => []),
       ),
     )
     const signals: BacktestSignal[] = []
@@ -278,6 +390,13 @@ function onDateRangeChange() {
 
 watch(showBackplay, (v) => {
   if (v && backplayTrades.value.length === 0) fetchBackplayData()
+})
+
+// 弹窗打开后触发 resize，让 ECharts 正确计算尺寸
+watch(entryDialogVisible, (visible) => {
+  if (visible) {
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 200)
+  }
 })
 
 onMounted(fetchData)
@@ -423,29 +542,68 @@ onMounted(fetchData)
   font-size: 0.9rem;
 }
 
-.position-detail {
+.strategy-logic-inline {
+  margin-top: 15px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 15px;
+}
+
+.logic-toggle {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 10px;
-  padding: 8px 4px;
+  cursor: pointer;
+}
 
-  .detail-row {
-    display: flex;
-    gap: 12px;
-    font-size: 14px;
-    color: #374151;
+.logic-label {
+  font-size: 14px;
+  color: #6b7280;
+}
 
-    span {
-      min-width: 96px;
-      color: #6b7280;
-    }
+.btn-toggle-inline {
+  background: none;
+  border: none;
+  color: #3b82f6;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
 
-    code {
-      background: #f3f4f6;
-      padding: 1px 8px;
-      border-radius: 4px;
-      font-size: 13px;
-    }
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.logic-content-inline {
+  margin-top: 15px;
+  padding: 15px;
+  background: #f9fafb;
+  border-radius: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.logic-section-inline {
+  margin-bottom: 12px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.logic-title-inline {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.logic-section-inline ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: #4b5563;
+
+  li {
+    margin-bottom: 3px;
   }
 }
 </style>

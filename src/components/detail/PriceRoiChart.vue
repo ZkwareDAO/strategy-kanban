@@ -54,7 +54,10 @@ function buildChartData() {
 
   const groupMap = new Map<string, PositionGroup>()
   for (const d of data) {
-    const pid = d.position_id || 'default'
+    // 跳过无持仓的中性 bar，不画 default 0 线
+    if (!d.position_id) continue
+
+    const pid = d.position_id
     if (!groupMap.has(pid)) {
       const shortId = pid.split('_').slice(-1)[0] || pid
       const label = `${d.position_type === 'short' ? '空' : '多'} #${shortId}`

@@ -6,7 +6,7 @@
         :key="index"
         class="token-tag"
         :class="[`mode-${item.mode}`, { 'no-data': !item.hasData, clickable: item.hasData }]"
-        @click="item.hasData && $emit('click', item.token)"
+        @click="$emit('click', item.token)"
       >
         {{ item.token }}
       </span>
@@ -25,7 +25,7 @@
               :key="index"
               class="token-tag"
               :class="[`mode-${item.mode}`, { 'no-data': !item.hasData, clickable: item.hasData }]"
-              @click="item.hasData && $emit('click', item.token)"
+              @click="$emit('click', item.token)"
             >
               {{ item.token }}
             </span>
@@ -87,16 +87,12 @@ const remainingCount = computed(() => {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.5px;
-}
-
-.token-tag.clickable {
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .token-tag.no-data {
-  opacity: 0.4;
-  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .mode-live {

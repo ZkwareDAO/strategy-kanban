@@ -26,8 +26,10 @@
         :summaries="strategyStore.strategySummaries"
         :runtimes="strategyStore.runtimes"
         :positions="strategyStore.positions"
+        :performances="performanceMap"
         :selected-date="selectedDate"
         @view-position="handleViewPosition"
+        @view-performance="handleViewPerformance"
         @date-change="handleDateChange"
       />
     </template>
@@ -35,10 +37,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useStrategyStore } from '@/stores/strategy'
 import { useAppStore } from '@/stores/app'
+import { getOrderPositions } from '@/api/performance'
+import type { StrategyPerformance, OrderPosition } from '@/models/performance'
 import StrategyList from '@/components/strategy/StrategyList.vue'
 import BacktestOverview from '@/components/BacktestOverview.vue'
 import PerformanceOverview from '@/components/PerformanceOverview.vue'
@@ -50,27 +54,82 @@ const appStore = useAppStore()
 
 const selectedDate = ref('')
 const activeTab = ref<'strategy' | 'backtest' | 'performance'>('strategy')
+const orderPositions = ref<OrderPosition[]>([])
+
+/** 按策略目录名聚合的绩效数据（key = dir_name，如 DOLPHINV2_4H_2） */
+const performanceMap = computed<Record<string, StrategyPerformance>>(() => {
+  const map = new Map<string, StrategyPerformance>()
+  for (const p of orderPositions.value) {
+    if (p.deleted !== 1 || p.pos_type !== 2) continue
+    // strategy_name 格式 {dir_name}_{SYMBOL}，去掉最后一段得到 dir_name
+    const idx = p.strategy_name.lastIndexOf('_')
+    const dirName = idx > 0 ? p.strategy_name.slice(0, idx) : p.strategy_name
+    let perf = map.get(dirName)
+    if (!perf) {
+      perf = { strategy_name: dirName, total_trades: 0, winning_trades: 0, losing_trades: 0, win_rate: 0, total_pnl: 0 }
+      map.set(dirName, perf)
+    }
+    perf.total_trades++
+    if (p.pnl_value > 0) perf.winning_trades++
+    else if (p.pnl_value < 0) perf.losing_trades++
+    perf.total_pnl += p.pnl_value
+  }
+  for (const perf of map.values()) {
+    perf.win_rate = perf.total_trades > 0 ? perf.winning_trades / perf.total_trades : 0
+  }
+  return Object.fromEntries(map)
+})
+
+async function loadPerformance(date: string) {
+  // 取当天的 RFC3339 区间
+  const y = date.slice(0, 4)
+  const m = date.slice(4, 6)
+  const d = date.slice(6, 8)
+  const from = `${y}-${m}-${d}T00:00:00Z`
+  const to = `${y}-${m}-${d}T23:59:59Z`
+  orderPositions.value = await getOrderPositions(from, to)
+}
 
 async function handleDateChange(date: string) {
+  selectedDate.value = date
   appStore.setDate(date)
-  await strategyStore.fetchRuntimes(date)
+  await Promise.all([
+    strategyStore.fetchRuntimes(date),
+    loadPerformance(date),
+  ])
 }
 
 function handleViewPosition(runtimeName: string, symbol: string) {
   const runtime = strategyStore.runtimes.find(r => r.runtime_name === runtimeName)
   if (runtime) {
     router.push({
-      name: 'TokenDetail',
+      name: 'TokenDetailV2',
       params: {
         strategy: runtime.strategy,
         symbol: symbol,
       },
       query: {
         runtime: runtime.runtime_name,
+        dir: runtime.dir_name,
         date: appStore.date,
       },
     })
   }
+}
+
+function handleViewPerformance(sourceStrategy: string) {
+  // 找到该 source_strategy 对应的 dir_name，传给 PerformanceDetail
+  const runtime = strategyStore.runtimes.find(r => r.strategy === sourceStrategy)
+  const dirName = runtime?.dir_name ?? sourceStrategy
+  router.push({
+    name: 'PerformanceDetail',
+    params: { strategyName: dirName },
+    query: {
+      from: selectedDate.value.slice(0, 4) + '-' + selectedDate.value.slice(4, 6) + '-' + selectedDate.value.slice(6, 8),
+      to: selectedDate.value.slice(0, 4) + '-' + selectedDate.value.slice(4, 6) + '-' + selectedDate.value.slice(6, 8),
+      from_tab: 'strategy',
+    },
+  })
 }
 
 onMounted(async () => {
@@ -84,7 +143,10 @@ onMounted(async () => {
   // 否则默认选择昨天的日期
   if (appStore.date) {
     selectedDate.value = appStore.date
-    await strategyStore.fetchRuntimes(appStore.date)
+    await Promise.all([
+      strategyStore.fetchRuntimes(appStore.date),
+      loadPerformance(appStore.date),
+    ])
   } else {
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)

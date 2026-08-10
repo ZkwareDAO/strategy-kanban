@@ -35,6 +35,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   entryClick: [entry: { position_id: string; position_type: string; entry_price: number; datetime: string }]
   exitClick: [exit: { position_id: string; position_type: string; exit_price: number; datetime: string }]
+  barClick: [bar: { datetime: string; open: number; high: number; low: number; close: number; pointNumber: number }]
 }>()
 
 const chartContainer = ref<HTMLDivElement>()
@@ -399,11 +400,14 @@ function renderChart() {
   const mainChartHeight = 0.50
   const subplotHeight = numSubplots > 0 ? (1 - mainChartHeight - timeLabelSpace - gap * numSubplots) / numSubplots : 0
 
-  // 找到第一个开仓点的位置
+  // 找到第一个开仓点的位置：有仓位时以开仓点为中心，无仓位时显示最新 N 根
   const firstEntryIndex = displayData.findIndex(d => d.is_entry)
-  const startIdx = firstEntryIndex >= 0
-    ? Math.max(0, firstEntryIndex - Math.floor(props.displayCount / 2))
-    : 0
+  let startIdx: number
+  if (firstEntryIndex >= 0) {
+    startIdx = Math.max(0, firstEntryIndex - Math.floor(props.displayCount / 2))
+  } else {
+    startIdx = Math.max(0, timestamps.length - props.displayCount)
+  }
   const endIdx = Math.min(startIdx + props.displayCount - 1, timestamps.length - 1)
 
   const layout: Partial<Layout> = {
@@ -516,6 +520,22 @@ function renderChart() {
             })
             return
           }
+        }
+      }
+
+      // 点击蜡烛图本体（curveNumber 0）：触发 barClick，展示 ROI/价格趋势图
+      const candlePoint = eventData.points.find(p => p.curveNumber === 0)
+      if (candlePoint) {
+        const bar = displayData[candlePoint.pointNumber]
+        if (bar) {
+          emit('barClick', {
+            datetime: bar.datetime,
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+            pointNumber: candlePoint.pointNumber,
+          })
         }
       }
     })

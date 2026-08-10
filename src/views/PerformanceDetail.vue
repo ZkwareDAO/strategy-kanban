@@ -152,7 +152,10 @@ function pnlClass(v: number): string {
 }
 
 function goBack() {
-  router.push({ path: '/', query: { tab: 'performance' } })
+  // 来源 tab 由 query.from_tab 指定（默认 performance），
+  // 从首页"实盘表现"进入时会带 from_tab=strategy，返回到对应 tab
+  const fromTab = (route.query.from_tab as string) || 'performance'
+  router.push({ path: '/', query: { tab: fromTab } })
 }
 
 onMounted(fetchData)

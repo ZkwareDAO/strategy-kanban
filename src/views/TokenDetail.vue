@@ -132,6 +132,7 @@ const props = defineProps<{
 
 const route = useRoute()
 const runtimeName = computed(() => (route.query.runtime as string) ?? '')
+const dirName = computed(() => (route.query.dir as string) ?? '')
 const date = computed(() => (route.query.date as string) ?? '')
 
 const formattedDate = computed(() => {
@@ -293,7 +294,7 @@ async function fetchData() {
     // 并行获取K线和对比数据
     const [kline, comparison] = await Promise.all([
       getKline(runtimeName.value, date.value).catch(() => []),
-      getComparison(props.strategy, props.symbol, date.value).catch(() => undefined),
+      getComparison(dirName.value || props.strategy, props.symbol, date.value).catch(() => undefined),
     ])
 
     klineData.value = kline
@@ -312,7 +313,7 @@ async function fetchBackplayData() {
   backplayLoading.value = true
   try {
     // 只从 CSV 文件加载回放数据（包含正确的开仓和平仓信息）
-    const trades = await getBacktestTrades(date.value, props.strategy, props.symbol)
+    const trades = await getBacktestTrades(date.value, dirName.value || props.strategy, props.symbol)
 
     if (trades.length > 0) {
       // 转换为信号点
