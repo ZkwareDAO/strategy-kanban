@@ -20,6 +20,7 @@ const BACKTEST_LINK = resolve('public/backtest-output')
 const BACKTEST_INDEX = resolve('public/backtest-output-index.json')
 const DEBOUNCE_MS = 2500
 const THROTTLE_MS = 10000
+const POLL_MS = 5000
 
 /** 判断路径是否为目录（不存在返回 false，不抛错） */
 function isDir(p: string): boolean {
@@ -111,6 +112,8 @@ function backtestIndexPlugin(): Plugin {
           timer = null
           lastRun = Date.now()
           generateBacktestIndex()
+          // 通过 HMR 通道通知前端索引已更新，前端收到后自行重新拉取
+          server.ws.send({ type: 'custom', event: 'backtest-index-updated' })
         }, wait)
       }
 
@@ -127,10 +130,43 @@ function backtestIndexPlugin(): Plugin {
         )
       } catch (err) {
         console.warn('[backtest-index] watch 失败:', err)
-        return
       }
 
-      server.httpServer?.on('close', () => watcher?.close())
+      // 兜底轮询：fs.watch 的 recursive 模式在 Linux 深层目录/软链接下不可靠，
+      // 每 POLL_MS 只对 strategy/date 两层做 mtime 检查（不递归全量扫描），
+      // 指纹变化才触发重新生成。
+      const fingerprint = (): string => {
+        const parts: string[] = []
+        try {
+          for (const strategy of readdirSync(realRoot)) {
+            const stratDir = join(realRoot, strategy)
+            if (!isDir(stratDir)) continue
+            parts.push(`${strategy}:${statSync(stratDir).mtimeMs}`)
+            for (const date of readdirSync(stratDir)) {
+              const dateDir = join(stratDir, date)
+              if (!isDir(dateDir)) continue
+              parts.push(`${date}:${statSync(dateDir).mtimeMs}`)
+            }
+          }
+        } catch {
+          return ''
+        }
+        return parts.join('|')
+      }
+
+      let lastFingerprint = fingerprint()
+      const poller = setInterval(() => {
+        const fp = fingerprint()
+        if (fp && fp !== lastFingerprint) {
+          lastFingerprint = fp
+          schedule()
+        }
+      }, POLL_MS)
+
+      server.httpServer?.on('close', () => {
+        watcher?.close()
+        clearInterval(poller)
+      })
     },
   }
 }

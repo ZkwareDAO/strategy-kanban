@@ -16,14 +16,18 @@ export interface DailyClosePoint {
 /**
  * 获取回测索引：每个 (策略, 代币) 的最新完整回测定位。
  *
- * 索引由 vite 插件在 dev/build 启动时自动生成到 /backtest-output-index.json，
- * 并在 dev 期间监听 backtest_result.json 落盘自动刷新。
+ * 索引由 vite 插件生成到 /backtest-output-index.json：
+ * dev 期间监听回测目录变化后重新生成，并通过 HMR 通道推送
+ * `backtest-index-updated` 事件，前端收到后重新调用本函数。
  *
  * @returns 索引条目数组；任何失败均返回空数组（不抛错）
  */
 export async function getBacktestIndex(): Promise<BacktestOutputEntry[]> {
   try {
-    const response = await fetch('/backtest-output-index.json')
+    // 带时间戳绕过浏览器缓存，确保拿到刚重新生成的索引
+    const response = await fetch(`/backtest-output-index.json?t=${Date.now()}`, {
+      cache: 'no-store',
+    })
     if (!response.ok) return []
     const data = (await response.json()) as BacktestOutputIndex
     return data.entries ?? []

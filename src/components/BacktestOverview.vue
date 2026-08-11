@@ -214,6 +214,14 @@ function fmtInt(v: number | undefined | null): string {
 }
 
 onMounted(loadRows)
+
+// dev 期间监听 vite 插件推送的索引更新事件，自动重新加载
+// （数据变化时才触发，既无需手动刷新，也不做轮询）
+if (import.meta.hot) {
+  import.meta.hot.on('backtest-index-updated', () => {
+    loadRows()
+  })
+}
 </script>
 
 <style scoped lang="scss">
