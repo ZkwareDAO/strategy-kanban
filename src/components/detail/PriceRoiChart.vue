@@ -34,28 +34,33 @@ interface PositionGroup {
 
 function buildChartData() {
   const data = props.timelineData || []
-  if (data.length === 0) return { times: [], priceData: [], positions: [] }
+  if (data.length === 0) return { times: [], priceData: [], positions: [], multiDay: false }
 
-  const timeList: string[] = []
-  const timeSet = new Set<string>()
-  const priceMap = new Map<string, number>()
-
+  // 每个 bar 在时间轴上独占一个位置（数组下标），不再按 HH:MM 去重——
+  // 否则多日数据中不同天的同一时刻会被错误折叠到同一点（开仓点重叠）。
+  const dateSet = new Set<string>()
   for (const d of data) {
-    const key = d.datetime?.slice(11, 16) || ''
-    if (!timeSet.has(key)) {
-      timeSet.add(key)
-      timeList.push(key)
-      priceMap.set(key, d.close)
-    }
+    const day = d.datetime?.slice(0, 10)
+    if (day) dateSet.add(day)
   }
+  const multiDay = dateSet.size > 1
 
-  const priceData = timeList.map(t => priceMap.get(t) || 0)
-  const timeIndexMap = new Map(timeList.map((t, i) => [t, i]))
+  // 单日显示 HH:MM；跨日显示 MM-DD HH:MM
+  const timeList = data.map((d) => {
+    const dt = d.datetime || ''
+    if (multiDay) {
+      // "2026-08-07 04:00:00" -> "08-07 04:00"
+      return `${dt.slice(5, 10)} ${dt.slice(11, 16)}`
+    }
+    return dt.slice(11, 16)
+  })
+
+  const priceData = data.map((d) => d.close)
 
   const groupMap = new Map<string, PositionGroup>()
-  for (const d of data) {
+  data.forEach((d, idx) => {
     // 跳过无持仓的中性 bar，不画 default 0 线
-    if (!d.position_id) continue
+    if (!d.position_id) return
 
     const pid = d.position_id
     if (!groupMap.has(pid)) {
@@ -73,22 +78,18 @@ function buildChartData() {
     }
 
     const group = groupMap.get(pid)!
-    const timeKey = d.datetime?.slice(11, 16) || ''
-    const idx = timeIndexMap.get(timeKey)
-    if (idx !== undefined) {
-      group.roiMap.set(idx, d.pnl_pct)
-    }
+    group.roiMap.set(idx, d.pnl_pct)
 
     if (d.is_entry && group.entryIndex === null) {
-      group.entryIndex = idx ?? null
+      group.entryIndex = idx
     }
     if (d.is_exit) {
-      group.exitIndex = idx ?? null
+      group.exitIndex = idx
     }
-  }
+  })
 
   const positions = Array.from(groupMap.values())
-  return { times: timeList, priceData, positions }
+  return { times: timeList, priceData, positions, multiDay }
 }
 
 function initChart() {
@@ -99,7 +100,7 @@ function initChart() {
   }
   chartInstance = echarts.init(chartRef.value)
 
-  const { times, priceData, positions } = buildChartData()
+  const { times, priceData, positions, multiDay } = buildChartData()
   if (times.length === 0) return
 
   const prices = priceData.filter(p => p > 0)
@@ -108,6 +109,22 @@ function initChart() {
   const priceRange = maxPrice - minPrice
   const priceMin = Math.max(0, minPrice - priceRange * 0.12)
   const priceMax = maxPrice + priceRange * 0.12
+
+  // 聚焦的仓位（点击开仓/平仓点打开弹窗时传入）。仅在【多日】场景下把时间轴
+  // 缩放到该仓位的持仓窗口——多日全景里单笔持仓只占很窄一段，缩放后价格与 ROI
+  // 的波动幅度自然回到可比区间，关联关系随之显现。
+  // 单日（每日收益入口）行为完全保持原样，不做任何缩放。
+  const highlighted = multiDay ? positions.find(p => p.id === props.highlightPositionId) : undefined
+  let zoomStartPct = 0
+  let zoomEndPct = 100
+  if (highlighted && highlighted.entryIndex !== null) {
+    const pad = Math.max(3, Math.floor(times.length * 0.02))
+    const end = highlighted.exitIndex !== null ? highlighted.exitIndex : times.length - 1
+    const zoomStart = Math.max(0, highlighted.entryIndex - pad)
+    const zoomEnd = Math.min(times.length - 1, end + pad)
+    zoomStartPct = times.length > 1 ? (zoomStart / (times.length - 1)) * 100 : 0
+    zoomEndPct = times.length > 1 ? (zoomEnd / (times.length - 1)) * 100 : 100
+  }
 
   const series: Record<string, unknown>[] = []
 
@@ -284,15 +301,38 @@ function initChart() {
       left: '3%',
       right: '4%',
       top: 40,
-      bottom: '3%',
+      bottom: multiDay ? 60 : '3%',
       containLabel: true,
     },
+    // 多日时提供底部滑动条，可手动拉近任意时间窗；
+    // 有聚焦仓位时默认窗口已锁定到该笔持仓，用户仍可拖动扩展查看前后文。
+    dataZoom: multiDay
+      ? [
+          {
+            type: 'inside',
+            xAxisIndex: 0,
+            start: zoomStartPct,
+            end: zoomEndPct,
+            zoomOnMouseWheel: 'shift',
+          },
+          {
+            type: 'slider',
+            xAxisIndex: 0,
+            start: zoomStartPct,
+            end: zoomEndPct,
+            height: 18,
+            bottom: 8,
+          },
+        ]
+      : [],
     xAxis: {
       type: 'category',
       data: times,
       axisLabel: {
-        interval: Math.floor(times.length / 8),
-        rotate: 0,
+        // 跨日数据点多时自动稀疏显示，避免标签挤成一团
+        interval: multiDay ? Math.max(0, Math.floor(times.length / 10)) : Math.floor(times.length / 8),
+        rotate: multiDay ? 35 : 0,
+        hideOverlap: true,
       },
     },
     yAxis: [

@@ -5,6 +5,7 @@ import type { Position } from '@/models/position'
 import type { SignalComparison } from '@/models/detail'
 import type { BacktestTrade } from '@/models/backtest'
 import type { KlinePoint } from '@/models/kline'
+import { enumerateDates } from '@/utils/dateRange'
 import { parseCsv } from '@/utils/csv'
 
 // ────────────────────────────────────────────────────────────────────
@@ -77,6 +78,27 @@ export async function getRuntimes(date: string): Promise<Runtime[]> {
   } catch {
     return []
   }
+}
+
+/**
+ * 获取日期区间内所有 manifest 的运行实例（扁平合并）。
+ *
+ * 区间统计需要跨多日按 生产/冒烟 模式过滤仓位，而 manifest 是按日生成的，
+ * 因此遍历区间内每一天调用 getRuntimes，扁平返回全部 Runtime[]
+ * （不去重——由 utils/modeFilter.buildModeMap 在 (dir_name|asset) 维度
+ *  并集去重）。任一日 fetch 失败静默跳过。
+ *
+ * @param createdFrom RFC3339 起始时间
+ * @param createdTo   RFC3339 结束时间
+ */
+export async function getRuntimesForDateRange(
+  createdFrom: string,
+  createdTo: string,
+): Promise<Runtime[]> {
+  const dates = enumerateDates(createdFrom, createdTo)
+  if (dates.length === 0) return []
+  const perDay = await Promise.all(dates.map((d) => getRuntimes(d)))
+  return perDay.flat()
 }
 
 // ────────────────────────────────────────────────────────────────────

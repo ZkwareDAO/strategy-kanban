@@ -1,5 +1,6 @@
 import Papa from 'papaparse'
 import { FRONTEND_DATA_BASE_URL } from '@/config/frontendData'
+import { enumerateDates } from '@/utils/dateRange'
 import type { OrderPosition } from '@/models/performance'
 
 function toNumber(value: string | undefined, fallback = 0): number {
@@ -17,6 +18,7 @@ function csvRowToOrderPosition(row: Record<string, string>): OrderPosition {
     deleted: toNumber(row.deleted, 0),
     created_at: row.created_at ?? '',
     close_time: row.close_time || null,
+    leverage: toNumber(row.leverage, 1),
   }
 }
 
@@ -35,27 +37,6 @@ async function readOneDay(yyyymmdd: string): Promise<OrderPosition[]> {
   } catch {
     return []
   }
-}
-
-/** 将 RFC3339 时间区间展开为 YYYYMMDD 日期数组（含首尾，UTC） */
-function enumerateDates(createdFrom: string, createdTo: string): string[] {
-  const from = new Date(createdFrom)
-  const to = new Date(createdTo)
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return []
-
-  const start = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()))
-  const end = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()))
-
-  const dates: string[] = []
-  const cur = new Date(start)
-  while (cur <= end) {
-    const y = cur.getUTCFullYear()
-    const m = String(cur.getUTCMonth() + 1).padStart(2, '0')
-    const d = String(cur.getUTCDate()).padStart(2, '0')
-    dates.push(`${y}${m}${d}`)
-    cur.setUTCDate(cur.getUTCDate() + 1)
-  }
-  return dates
 }
 
 /**

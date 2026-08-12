@@ -1,6 +1,6 @@
 <template>
   <div class="backtest-detail-page">
-    <button class="back-btn" @click="goBack">← 返回回测列表</button>
+    <button class="back-btn" @click="goBack">← 返回</button>
 
     <div v-if="loading" class="state">加载中...</div>
     <div v-else-if="error" class="state error">{{ error }}</div>
@@ -36,7 +36,7 @@
             </div>
             <div class="info-item">
               <span class="info-label">代币</span>
-              <b class="info-value">{{ symbol }}</b>
+              <b class="info-value">{{ stripUsdt(symbol) }}</b>
             </div>
             <div class="info-item">
               <span class="info-label">初始资金</span>
@@ -381,7 +381,15 @@ function fmtDuration(v: number | undefined | null): string {
   return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟`
 }
 
+function stripUsdt(s: string): string {
+  return s.endsWith('USDT') ? s.slice(0, -4) : s
+}
+
 function goBack() {
+  if (window.history.length > 1) {
+    router.back()
+    return
+  }
   router.push({ path: '/', query: { tab: 'backtest' } })
 }
 

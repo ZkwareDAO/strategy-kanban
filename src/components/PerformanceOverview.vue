@@ -1,17 +1,40 @@
 <template>
   <div class="performance-overview">
-    <!-- 日期范围选择 -->
+    <!-- 工具栏：模式切换 + 日期范围 + 快捷预设 + 前后日步进 -->
     <div class="toolbar">
-      <el-date-picker
-        v-model="dateRange"
-        type="daterange"
-        range-separator="至"
-        start-placeholder="开始日期"
-        end-placeholder="结束日期"
-        format="YYYY-MM-DD"
-        value-format="YYYY-MM-DD"
-        @change="handleDateChange"
-      />
+      <div class="mode-filter">
+        <span class="mode-filter-label">模式</span>
+        <div class="mode-chips">
+          <button
+            v-for="m in MODE_OPTIONS"
+            :key="m.value"
+            class="mode-chip"
+            :class="{ active: isModeActive(m.value), [m.value]: isModeActive(m.value) }"
+            @click="toggleMode(m.value)"
+          >
+            <span class="check" aria-hidden="true">✓</span>
+            {{ m.label }}
+          </button>
+        </div>
+      </div>
+
+      <div class="date-stepper">
+        <button class="step-btn" title="整体前移一日" @click="stepRange(-1)">‹</button>
+        <el-date-picker
+          v-model="dateRange"
+          type="daterange"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          format="YYYY-MM-DD"
+          value-format="YYYY-MM-DD"
+          :shortcuts="dateShortcuts"
+          :clearable="false"
+          @change="handleDateChange"
+        />
+        <button class="step-btn" title="整体后移一日" @click="stepRange(1)">›</button>
+      </div>
+
       <span class="row-count">{{ strategyList.length }} 条策略</span>
     </div>
 
@@ -25,24 +48,30 @@
         <thead>
           <tr>
             <th>策略名称</th>
-            <th>总交易数</th>
-            <th>盈利交易</th>
-            <th>亏损交易</th>
+            <th>PNL</th>
             <th>胜率</th>
-            <th>总盈亏</th>
-            <th>操作</th>
+            <th>杠杆</th>
+            <th>模式</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="s in strategyList" :key="s.strategy_name">
             <td class="col-name">{{ s.strategy_name }}</td>
-            <td>{{ s.total_trades }}</td>
-            <td class="val-positive">{{ s.winning_trades }}</td>
-            <td class="val-negative">{{ s.losing_trades }}</td>
-            <td :class="winRateClass(s.win_rate)">{{ fmtPct(s.win_rate) }}</td>
             <td :class="pnlClass(s.total_pnl)">{{ fmtPnl(s.total_pnl) }}</td>
+            <td :class="winRateClass(s.win_rate)">{{ fmtPct(s.win_rate) }}</td>
+            <td>{{ s.max_leverage }}x</td>
+            <td class="col-modes">
+              <span v-if="s.modes.length === 0" class="muted">-</span>
+              <span
+                v-for="m in s.modes"
+                :key="m"
+                class="mode-tag"
+                :class="`mode-${m}`"
+              >{{ formatMode(m) }}</span>
+            </td>
             <td>
-              <button class="detail-btn" @click="goDetail(s.strategy_name)">详情</button>
+              <button class="more-btn" @click="goDetail(s.strategy_name)">更多</button>
             </td>
           </tr>
         </tbody>
@@ -55,15 +84,26 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getOrderPositions } from '@/api/performance'
+import { getRuntimesForDateRange } from '@/api/strategy'
+import { buildModeMap, filterPositionsByModes, positionModes, extractStrategyGroup, type SelectableMode } from '@/utils/modeFilter'
 import type { OrderPosition, StrategyPerformance } from '@/models/performance'
+import type { TradingMode } from '@/models/runtime'
 
 const router = useRouter()
+
+const MODE_OPTIONS: { value: SelectableMode; label: string }[] = [
+  { value: 'live', label: '生产' },
+  { value: 'smoking', label: '冒烟' },
+]
 
 const loading = ref(false)
 const error = ref('')
 const rawPositions = ref<OrderPosition[]>([])
+const modeMap = ref<Map<string, Set<TradingMode>>>(new Map())
+// 多选模式：默认全选，至少保留一个；点击已选中的模式会取消（若是最后一个则忽略）
+const selectedModes = ref<Set<SelectableMode>>(new Set(['live', 'smoking']))
 
-// 默认日期范围：上周一 ~ 今天
+// ---- 日期范围 ----
 function getLastMonday(): Date {
   const now = new Date()
   const day = now.getDay() // 0=Sun
@@ -97,33 +137,87 @@ const dateRange = ref<[string, string]>([
   today.toISOString().slice(0, 10),
 ])
 
-// 从 strategy_name 提取策略组名（去掉最后的 _SYMBOL 部分）
-// 例如: DOLPHINV2_4H_2_DOGEUSDT → DOLPHINV2_4H_2
-//       VWAPMOM_15M_1_XLMUSDT → VWAPMOM_15M_1
-//       SYNC_BTC-21AUG26-63000-P → SYNC (期权策略，特殊处理)
-function extractStrategyGroup(strategyName: string): string {
-  // 期权策略以 SYNC_ 开头，整个 strategy_name 就是组名（没有代币后缀可拆）
-  if (strategyName.startsWith('SYNC_')) return strategyName
-  // 期货策略：去掉最后一个 _XXX 部分（代币名）
-  const lastUnderscore = strategyName.lastIndexOf('_')
-  if (lastUnderscore <= 0) return strategyName
-  return strategyName.slice(0, lastUnderscore)
+// 日期快捷预设（el-date-picker daterange shortcuts API）
+const dateShortcuts = computed(() => {
+  const now = new Date()
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const yesterday = new Date(todayStart)
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1)
+  const day7 = new Date(todayStart)
+  day7.setUTCDate(day7.getUTCDate() - 6)
+  const day30 = new Date(todayStart)
+  day30.setUTCDate(day30.getUTCDate() - 29)
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+  return [
+    { text: '今日', value: [todayStart, todayStart] as [Date, Date] },
+    { text: '昨日', value: [yesterday, yesterday] as [Date, Date] },
+    { text: '近7日', value: [day7, todayStart] as [Date, Date] },
+    { text: '近30日', value: [day30, todayStart] as [Date, Date] },
+    { text: '本月', value: [monthStart, todayStart] as [Date, Date] },
+  ]
+})
+
+// 前后日整体平移（保持区间跨度不变）
+function stepRange(delta: number): void {
+  if (!dateRange.value || dateRange.value.length !== 2) return
+  const [from, to] = dateRange.value
+  const fromDt = dateToStartOfDay(from)
+  const toDt = dateToStartOfDay(to)
+  fromDt.setUTCDate(fromDt.getUTCDate() + delta)
+  toDt.setUTCDate(toDt.getUTCDate() + delta)
+  const fmt = (d: Date) => d.toISOString().slice(0, 10)
+  dateRange.value = [fmt(fromDt), fmt(toDt)]
+  handleDateChange()
 }
 
-// 聚合策略维度数据（按策略组名聚合）
-const strategyList = computed<StrategyPerformance[]>(() => {
-  // 只统计已平仓的期货交易 (deleted=1, pos_type=2)
-  const closed = rawPositions.value.filter(p => p.deleted === 1 && p.pos_type === 2)
-  const map = new Map<string, StrategyPerformance>()
+// 多选切换：点亮/取消某模式；至少保留一个，不允许全空
+function toggleMode(m: SelectableMode): void {
+  const next = new Set(selectedModes.value)
+  if (next.has(m)) {
+    if (next.size > 1) next.delete(m)
+  } else {
+    next.add(m)
+  }
+  selectedModes.value = next
+}
 
-  for (const p of closed) {
+function isModeActive(m: SelectableMode): boolean {
+  return selectedModes.value.has(m)
+}
+
+interface StrategyRow extends StrategyPerformance {
+  /** 该策略在选中模式下实际命中的模式 */
+  modes: SelectableMode[]
+}
+
+// ---- 聚合策略维度数据（按 dir_name 聚合，先按模式过滤）----
+const strategyList = computed<StrategyRow[]>(() => {
+  // 仅统计已平仓的期货交易 (deleted=1, pos_type=2)，再按选中模式集合过滤
+  const closed = rawPositions.value.filter((p) => p.deleted === 1 && p.pos_type === 2)
+  const filtered = filterPositionsByModes(closed, modeMap.value, selectedModes.value)
+  const map = new Map<string, StrategyRow>()
+  const groupModes = new Map<string, Set<'live' | 'smoking'>>()
+
+  for (const p of filtered) {
     const group = extractStrategyGroup(p.strategy_name)
+    // 累计该策略命中的模式
+    const modes = positionModes(p, modeMap.value)
+    if (modes) {
+      let gm = groupModes.get(group)
+      if (!gm) {
+        gm = new Set<'live' | 'smoking'>()
+        groupModes.set(group, gm)
+      }
+      if (modes.has('live')) gm.add('live')
+      if (modes.has('smoking')) gm.add('smoking')
+    }
     const existing = map.get(group)
     if (existing) {
       existing.total_trades += 1
       if (p.pnl_value > 0) existing.winning_trades += 1
       if (p.pnl_value < 0) existing.losing_trades += 1
       existing.total_pnl += p.pnl_value
+      if (p.leverage > existing.max_leverage) existing.max_leverage = p.leverage
     } else {
       map.set(group, {
         strategy_name: group,
@@ -132,12 +226,17 @@ const strategyList = computed<StrategyPerformance[]>(() => {
         losing_trades: p.pnl_value < 0 ? 1 : 0,
         win_rate: 0,
         total_pnl: p.pnl_value,
+        max_leverage: p.leverage,
+        mode: 'live',
+        modes: [],
       })
     }
   }
 
   for (const s of map.values()) {
     s.win_rate = s.total_trades > 0 ? s.winning_trades / s.total_trades : 0
+    const gm = groupModes.get(s.strategy_name)
+    s.modes = gm ? Array.from(gm) : []
   }
 
   return Array.from(map.values()).sort((a, b) => b.total_pnl - a.total_pnl)
@@ -150,7 +249,12 @@ async function fetchData() {
   try {
     const from = toRfc3339(dateToStartOfDay(dateRange.value[0]))
     const to = toRfc3339(dateToEndOfDay(dateRange.value[1]))
-    rawPositions.value = await getOrderPositions(from, to)
+    const [positions, runtimes] = await Promise.all([
+      getOrderPositions(from, to),
+      getRuntimesForDateRange(from, to),
+    ])
+    rawPositions.value = positions
+    modeMap.value = buildModeMap(runtimes)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -169,8 +273,17 @@ function goDetail(strategyName: string) {
     query: {
       from: dateRange.value?.[0] ?? '',
       to: dateRange.value?.[1] ?? '',
+      from_tab: 'performance',
+      modes: Array.from(selectedModes.value).join(','),
+      tf: '1h',
     },
   })
+}
+
+function formatMode(mode: string): string {
+  if (mode === 'live') return '生产'
+  if (mode === 'smoking') return '冒烟'
+  return mode
 }
 
 // ---- Formatting ----
@@ -209,6 +322,97 @@ onMounted(fetchData)
   gap: 16px;
   padding: 16px 20px;
   border-bottom: 1px solid #f0f0f0;
+  flex-wrap: wrap;
+}
+
+.mode-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mode-filter-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #9ca3af;
+  letter-spacing: 0.5px;
+}
+
+.mode-chips {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1.5px solid #e5e7eb;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+
+  .check {
+    font-size: 12px;
+    opacity: 0;
+    transform: scale(0.6);
+    transition: all 0.15s;
+  }
+
+  &:hover {
+    border-color: #d1d5db;
+    color: #6b7280;
+  }
+
+  &.active.live {
+    background: #dc2626;
+    border-color: #dc2626;
+    color: #fff;
+  }
+
+  &.active.smoking {
+    background: #4f46e5;
+    border-color: #4f46e5;
+    color: #fff;
+  }
+
+  &.active .check {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.date-stepper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.step-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  color: #606266;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    border-color: #3b82f6;
+    color: #3b82f6;
+  }
 }
 
 .row-count {
@@ -234,7 +438,8 @@ onMounted(fetchData)
   width: 100%;
   border-collapse: collapse;
 
-  th, td {
+  th,
+  td {
     padding: 14px 16px;
     text-align: center;
     font-size: 14px;
@@ -246,7 +451,6 @@ onMounted(fetchData)
     font-weight: 600;
     color: #6b7280;
     font-size: 13px;
-    text-transform: uppercase;
     letter-spacing: 0.5px;
   }
 
@@ -255,9 +459,20 @@ onMounted(fetchData)
     font-weight: 600;
     color: #1f2937;
   }
+
+  .col-modes {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .muted {
+    color: #d1d5db;
+  }
 }
 
-.detail-btn {
+.more-btn {
   padding: 6px 16px;
   background: #3b82f6;
   color: white;
@@ -270,6 +485,24 @@ onMounted(fetchData)
   &:hover {
     background: #2563eb;
   }
+}
+
+.mode-tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mode-live {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.mode-smoking {
+  background: #e0e7ff;
+  color: #4f46e5;
 }
 
 .val-positive {

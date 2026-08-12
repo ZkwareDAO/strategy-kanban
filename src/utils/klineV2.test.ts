@@ -117,6 +117,47 @@ describe('klineV2 utils', () => {
       expect(merged[1].open).toBe(100)
     })
 
+    // 回归：连续开平仓（上一笔平仓与下一笔开仓落在同一分钟）时，
+    // 该 bar 必须同时带 is_entry 和 is_exit，否则平仓标记会全部丢失，
+    // 蜡烛图上表现为「N 个开仓点只剩 1 个平仓点」。
+    it('should keep both entry and exit on a bar that closes one position and opens the next', () => {
+      const backToBackKline: RawKlinePoint[] = [
+        { timestamp: 1, datetime: '2026-08-06 00:00:00', open: 0.72, high: 0.72, low: 0.71, close: 0.7198 },
+        { timestamp: 2, datetime: '2026-08-06 00:02:00', open: 0.72, high: 0.73, low: 0.72, close: 0.7204 },
+        { timestamp: 3, datetime: '2026-08-06 00:04:00', open: 0.72, high: 0.73, low: 0.72, close: 0.7204 },
+      ]
+      const positions: DatedPosition[] = [
+        {
+          position_id: 'a', type: 'long',
+          entry_time: '2026-08-06T00:00:00+00:00',
+          exit_time: '2026-08-06T00:02:07.903235+00:00',
+          entry_price: 0.7198, exit_price: 0.7204,
+          realized_pnl: 0.0834, max_potential_pnl: 0.0834, max_drawdown: 0,
+          date: '2026-08-06',
+        },
+        {
+          position_id: 'b', type: 'long',
+          entry_time: '2026-08-06T00:02:00+00:00',
+          exit_time: '2026-08-06T00:04:10.221242+00:00',
+          entry_price: 0.7198, exit_price: 0.7204,
+          realized_pnl: 0.0834, max_potential_pnl: 0.0834, max_drawdown: 0,
+          date: '2026-08-06',
+        },
+      ]
+      const merged = mergePositions(backToBackKline, positions)
+
+      // 00:02 既平掉 a 又开出 b
+      expect(merged[1].is_exit).toBe(true)
+      expect(merged[1].is_entry).toBe(true)
+      expect(merged[1].exits?.map(x => x.position_id)).toContain('a')
+      expect(merged[1].entries?.map(e => e.position_id)).toContain('b')
+      // 平仓语义优先：该 bar 的 ROI 取已实现收益，不被浮动 ROI 覆盖
+      expect(merged[1].pnl_pct).toBe(0.0834)
+      // 00:04 是 b 的平仓点，同样不能丢
+      expect(merged[2].is_exit).toBe(true)
+      expect(merged[2].exits?.map(x => x.position_id)).toContain('b')
+    })
+
     it('should leave all bars neutral when no positions', () => {
       const merged = mergePositions(kline, [])
       expect(merged).toHaveLength(kline.length)

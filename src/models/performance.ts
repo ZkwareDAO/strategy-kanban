@@ -14,7 +14,12 @@ export interface OrderPosition {
   created_at: string
   /** 平仓时间（RFC 3339），持仓中为空 */
   close_time: string | null
+  /** 杠杆倍数（API 返回，默认 1） */
+  leverage: number
 }
+
+/** 交易模式类型（与 runtime.ts 的 TradingMode 一致，避免循环依赖此处内联） */
+export type PerformanceMode = 'live' | 'paper_trading' | 'smoking' | 'unknown'
 
 /** 策略维度汇总 */
 export interface StrategyPerformance {
@@ -24,6 +29,10 @@ export interface StrategyPerformance {
   losing_trades: number
   win_rate: number      // 0~1
   total_pnl: number
+  /** 该策略已平仓位中观察到的最大杠杆（风险视角） */
+  max_leverage: number
+  /** 该策略在所选模式下的模式标签（live/smoking/...） */
+  mode: PerformanceMode
 }
 
 /** 策略+代币维度汇总 */

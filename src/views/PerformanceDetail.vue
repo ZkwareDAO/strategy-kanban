@@ -1,10 +1,13 @@
 <template>
   <div class="performance-detail-page">
-    <button class="back-btn" @click="goBack">← 返回策略表现</button>
+    <button class="back-btn" @click="goBack">← {{ backLabel }}</button>
 
     <div class="page-header">
       <h2>{{ strategyName }}</h2>
-      <p v-if="dateFrom && dateTo">{{ dateFrom }} ~ {{ dateTo }}</p>
+      <p>
+        <span v-if="dateFrom && dateTo">{{ dateFrom }} ~ {{ dateTo }}</span>
+        <span class="mode-chip" :class="modeChipClass">{{ modeLabel }}</span>
+      </p>
     </div>
 
     <div v-if="loading" class="state">加载中...</div>
@@ -23,6 +26,7 @@
             <th>最大盈利</th>
             <th>最大亏损</th>
             <th>总盈亏</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -35,6 +39,9 @@
             <td class="val-positive">{{ fmtPnl(s.max_profit) }}</td>
             <td class="val-negative">{{ fmtPnl(s.max_loss) }}</td>
             <td :class="pnlClass(s.total_pnl)">{{ fmtPnl(s.total_pnl) }}</td>
+            <td>
+              <button class="more-btn" @click="goCandle(s.symbol)">更多</button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -46,7 +53,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getOrderPositions } from '@/api/performance'
+import { getRuntimesForDateRange } from '@/api/strategy'
+import { buildModeMap, filterPositionsByModes, type SelectableMode } from '@/utils/modeFilter'
 import type { OrderPosition, SymbolPerformance } from '@/models/performance'
+import type { Runtime, TradingMode } from '@/models/runtime'
 
 const props = defineProps<{
   strategyName: string
@@ -56,10 +66,35 @@ const route = useRoute()
 const router = useRouter()
 const dateFrom = route.query.from as string
 const dateTo = route.query.to as string
+// 来源 tab：从「每日收益」进入为 strategy，从「区间统计」进入为 performance
+const fromTab = (route.query.from_tab as string) || 'performance'
+const backLabel = fromTab === 'strategy' ? '返回每日收益' : '返回区间统计'
+// 所选模式（区间统计透传，逗号分隔；默认全部）
+const VALID_SELECTABLE: SelectableMode[] = ['live', 'smoking']
+function parseModes(raw: unknown): Set<SelectableMode> {
+  if (typeof raw !== 'string' || !raw) return new Set(VALID_SELECTABLE)
+  const parts = raw.split(',').map(s => s.trim()).filter(Boolean)
+  const set = new Set<SelectableMode>()
+  for (const p of parts) {
+    if ((VALID_SELECTABLE as string[]).includes(p)) set.add(p as SelectableMode)
+  }
+  return set.size > 0 ? set : new Set(VALID_SELECTABLE)
+}
+const selectedModes = parseModes(route.query.modes)
+const modeLabel = selectedModes.size === 2
+  ? '全部'
+  : Array.from(selectedModes).map(m => m === 'live' ? '生产' : '冒烟').join('/')
+// chip 配色：全选用中性灰，否则用第一个选中模式的配色
+const modeChipClass = selectedModes.size === 2 ? 'all' : Array.from(selectedModes)[0]
+// 蜡烛图周期透传（默认 1h）
+const tf = (route.query.tf as string) || '1h'
 
 const loading = ref(true)
 const error = ref('')
 const rawPositions = ref<OrderPosition[]>([])
+const modeMap = ref<Map<string, Set<TradingMode>>>(new Map())
+// 区间内所有运行实例，用于跳转蜡烛图时按 (dir_name, symbol, 模式) 反查 source_strategy / runtime_name
+const runtimes = ref<Runtime[]>([])
 
 function toRfc3339(d: Date): string {
   return d.toISOString().replace(/\.\d{3}Z$/, 'Z')
@@ -120,17 +155,61 @@ async function fetchData() {
   try {
     const from = toRfc3339(dateToStartOfDay(dateFrom))
     const to = toRfc3339(dateToEndOfDay(dateTo))
-    const allPositions = await getOrderPositions(from, to)
-    // 匹配策略组：strategy_name 以策略组名开头（如 DOLPHINV2_4H_2_DOGEUSDT 匹配 DOLPHINV2_4H_2）
-    rawPositions.value = allPositions.filter(p => {
+    const [allPositions, rangeRuntimes] = await Promise.all([
+      getOrderPositions(from, to),
+      getRuntimesForDateRange(from, to),
+    ])
+    modeMap.value = buildModeMap(rangeRuntimes)
+    runtimes.value = rangeRuntimes
+    // 1. 匹配策略组：strategy_name 以策略组名开头
+    //    （如 DOLPHINV2_4H_2_DOGEUSDT 匹配 DOLPHINV2_4H_2）
+    // 2. 再按所选模式（生产/冒烟）过滤
+    const inStrategy = allPositions.filter(p => {
       if (p.strategy_name === props.strategyName) return true
       return p.strategy_name.startsWith(props.strategyName + '_')
     })
+    rawPositions.value = filterPositionsByModes(inStrategy, modeMap.value, selectedModes)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
     loading.value = false
   }
+}
+
+// 按 (dir_name, symbol, 选中模式) 反查 runtime，用于跳转蜡烛图时补齐 dir/runtime
+// 参数，使 TokenDetailV2 能加载开平仓点、回放、对比数据与策略逻辑（与每日收益入口一致）。
+function findRuntime(symbol: string): Runtime | undefined {
+  const candidates = runtimes.value.filter(
+    r => r.dir_name === props.strategyName && r.symbol === symbol,
+  )
+  if (candidates.length === 0) return undefined
+  // 优先匹配当前选中的模式；单选时取对应模式，全选时优先 live 再 smoking
+  const modeOrder = Array.from(selectedModes)
+  for (const m of modeOrder) {
+    const hit = candidates.find(r => r.trading_mode === m)
+    if (hit) return hit
+  }
+  return candidates[0]
+}
+
+function goCandle(symbol: string) {
+  const runtime = findRuntime(symbol)
+  // route param strategy 用 source_strategy（策略内部名），用于匹配策略逻辑配置；
+  // 没有 runtime 时回退为 dir_name，TokenDetailV2 会以纯K线模式展示。
+  const sourceStrategy = runtime?.strategy ?? props.strategyName
+  router.push({
+    name: 'TokenDetailV2',
+    params: {
+      strategy: sourceStrategy,
+      symbol,
+    },
+    query: {
+      from: dateFrom,
+      to: dateTo,
+      tf,
+      ...(runtime ? { runtime: runtime.runtime_name, dir: runtime.dir_name } : {}),
+    },
+  })
 }
 
 function fmtPct(v: number): string {
@@ -152,9 +231,12 @@ function pnlClass(v: number): string {
 }
 
 function goBack() {
-  // 来源 tab 由 query.from_tab 指定（默认 performance），
-  // 从首页"实盘表现"进入时会带 from_tab=strategy，返回到对应 tab
-  const fromTab = (route.query.from_tab as string) || 'performance'
+  // 优先用浏览器历史栈返回（回到上一页，即来源 tab 所在的首页状态）
+  if (window.history.length > 1) {
+    router.back()
+    return
+  }
+  // 无历史时兜底：按来源 tab 回到首页对应 tab
   router.push({ path: '/', query: { tab: fromTab } })
 }
 
@@ -201,6 +283,32 @@ onMounted(fetchData)
     margin: 0;
     font-size: 14px;
     color: #6b7280;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+}
+
+.mode-chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+
+  &.all {
+    background: #f3f4f6;
+    color: #6b7280;
+  }
+
+  &.live {
+    background: #fee2e2;
+    color: #dc2626;
+  }
+
+  &.smoking {
+    background: #e0e7ff;
+    color: #4f46e5;
   }
 }
 
@@ -237,7 +345,6 @@ onMounted(fetchData)
     font-weight: 600;
     color: #6b7280;
     font-size: 13px;
-    text-transform: uppercase;
     letter-spacing: 0.5px;
   }
 
@@ -245,6 +352,21 @@ onMounted(fetchData)
     text-align: left;
     font-weight: 600;
     color: #1f2937;
+  }
+}
+
+.more-btn {
+  padding: 6px 16px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s;
+
+  &:hover {
+    background: #2563eb;
   }
 }
 

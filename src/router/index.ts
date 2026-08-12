@@ -32,6 +32,11 @@ const router = createRouter({
       component: () => import('@/views/PerformanceDetail.vue'),
       props: true,
     },
+    {
+      path: '/backtest-token-list',
+      name: 'BacktestTokenList',
+      component: () => import('@/views/BacktestTokenList.vue'),
+    },
   ],
 })
 

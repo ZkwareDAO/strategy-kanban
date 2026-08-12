@@ -169,7 +169,13 @@ const error = ref<string | null>(null)
 const rawKline = ref<RawKlinePoint[]>([])
 const datedPositions = ref<DatedPosition[]>([])
 const selectedIndicators = ref<IndicatorType[]>(['RSI', 'MACD', 'ATR'])
-const selectedTimeframe = ref<TimeframeValue>('5m')
+
+const VALID_TFS: TimeframeValue[] = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
+const tfQuery = (route.query.tf as string) ?? ''
+const initialTf: TimeframeValue = (VALID_TFS as string[]).includes(tfQuery)
+  ? (tfQuery as TimeframeValue)
+  : '5m'
+const selectedTimeframe = ref<TimeframeValue>(initialTf)
 const displayCount = ref(100)
 
 const showBackplay = ref(false)
@@ -212,6 +218,12 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10)
 }
 function initialDateRange(): [string, string] {
+  // 优先使用 from/to（ISO YYYY-MM-DD，区间统计等入口透传）
+  const qFrom = (route.query.from as string) ?? ''
+  const qTo = (route.query.to as string) ?? ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(qFrom) && /^\d{4}-\d{2}-\d{2}$/.test(qTo)) {
+    return [qFrom, qTo]
+  }
   const q = (route.query.date as string) ?? ''
   if (/^\d{8}$/.test(q)) {
     const iso = yyyymmddToIso(q)

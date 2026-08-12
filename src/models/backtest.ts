@@ -121,3 +121,26 @@ export interface BacktestOutputIndex {
   generated_at: string
   entries: BacktestOutputEntry[]
 }
+
+/**
+ * 策略发现页的策略层级分组行：同一策略 + 同一回测区间合并成一行。
+ *
+ * 分组键 = `${strategy}|${start_date}|${end_date}`。
+ * 同一策略若有不同回测区间，则拆成多行。
+ */
+export interface BacktestGroupRow {
+  /** 策略目录名，如 obv_atr_v2 */
+  strategy: string
+  /** 该组下所有代币（展示时用 `|` 连接） */
+  symbols: string[]
+  /** 组内最佳年化收益（取所有代币 annualized_return 的最大值） */
+  best_annualized: number
+  /** 回测区间开始日期（backtest_result.config.start_date） */
+  start_date: string
+  /** 回测区间结束日期（backtest_result.config.end_date） */
+  end_date: string
+  /** 完成时间（组内最新 end_time，回退为索引 date+time） */
+  completed_at: string
+  /** 该组下每个代币的索引条目（供代币层列表页跳转） */
+  token_entries: BacktestOutputEntry[]
+}

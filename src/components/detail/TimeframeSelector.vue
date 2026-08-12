@@ -47,6 +47,10 @@ const timeframes = [
   { value: '1m' as TimeframeValue, label: '1分钟' },
   { value: '5m' as TimeframeValue, label: '5分钟' },
   { value: '15m' as TimeframeValue, label: '15分钟' },
+  { value: '30m' as TimeframeValue, label: '30分钟' },
+  { value: '1h' as TimeframeValue, label: '1小时' },
+  { value: '4h' as TimeframeValue, label: '4小时' },
+  { value: '1d' as TimeframeValue, label: '1天' },
 ]
 </script>
 

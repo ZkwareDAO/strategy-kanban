@@ -2,14 +2,14 @@
   <div class="strategy-overview">
     <!-- Header -->
     <div class="header">
-      <h1>交易复盘系统</h1>
+      <h1>策略看板</h1>
     </div>
 
     <!-- 模式切换 -->
     <el-tabs v-model="activeTab" class="mode-tabs">
-      <el-tab-pane label="实盘表现" name="strategy" />
-      <el-tab-pane label="回测详情" name="backtest" />
-      <el-tab-pane label="策略表现" name="performance" />
+      <el-tab-pane label="每日收益" name="strategy" />
+      <el-tab-pane label="区间统计" name="performance" />
+      <el-tab-pane label="策略发现" name="backtest" />
     </el-tabs>
 
     <!-- 回测详情 -->
@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useStrategyStore } from '@/stores/strategy'
 import { useAppStore } from '@/stores/app'
@@ -66,13 +66,14 @@ const performanceMap = computed<Record<string, StrategyPerformance>>(() => {
     const dirName = idx > 0 ? p.strategy_name.slice(0, idx) : p.strategy_name
     let perf = map.get(dirName)
     if (!perf) {
-      perf = { strategy_name: dirName, total_trades: 0, winning_trades: 0, losing_trades: 0, win_rate: 0, total_pnl: 0 }
+      perf = { strategy_name: dirName, total_trades: 0, winning_trades: 0, losing_trades: 0, win_rate: 0, total_pnl: 0, max_leverage: 1, mode: 'live' }
       map.set(dirName, perf)
     }
     perf.total_trades++
     if (p.pnl_value > 0) perf.winning_trades++
     else if (p.pnl_value < 0) perf.losing_trades++
     perf.total_pnl += p.pnl_value
+    if (p.leverage > perf.max_leverage) perf.max_leverage = p.leverage
   }
   for (const perf of map.values()) {
     perf.win_rate = perf.total_trades > 0 ? perf.winning_trades / perf.total_trades : 0
@@ -154,6 +155,21 @@ onMounted(async () => {
     selectedDate.value = defaultDate
     await handleDateChange(defaultDate)
   }
+})
+
+/**
+ * 同步当前 tab 到 URL query.tab，使刷新/返回时能恢复正确 tab。
+ * - strategy：移除 query.tab（避免残留 performance/backtest）
+ * - backtest/performance：写入 query.tab
+ */
+watch(activeTab, (tab) => {
+  const query = { ...route.query }
+  if (tab === 'strategy') {
+    delete query.tab
+  } else {
+    query.tab = tab
+  }
+  router.replace({ query })
 })
 </script>
 

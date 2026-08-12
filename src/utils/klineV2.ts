@@ -181,44 +181,60 @@ export function mergePositions(kline: RawKlinePoint[], positions: DatedPosition[
   }
 
   // 先构建基础数组，标记 entry/exit bar
+  //
+  // 注意：同一根 bar 可能既是某笔的平仓点、又是下一笔的开仓点（连续开平仓，
+  // 如 00:02 平掉第1笔同时开第2笔）。因此 entry 与 exit 必须同时判断并共存，
+  // 不能命中 entry 就提前返回，否则这些 bar 的平仓标记会全部丢失。
   const result = kline.map(p => {
     const neutral = neutralKline(p)
     const minuteKey = `${p.datetime.slice(0, 10)} ${p.datetime.slice(11, 16)}`
     const entries = entryMap.get(minuteKey)
-    if (entries && entries.length > 0) {
-      const e = entries[0]
-      return {
-        ...neutral,
-        is_entry: true,
-        position_id: e.position_id,
-        entry_price: e.entry_price,
-        position_type: e.type,
-        pnl_pct: 0,
-        entries: entries.map(toEntryInfo),
-      }
-    }
     const exits = exitMap.get(minuteKey)
-    if (exits && exits.length > 0) {
-      const x = exits[0]
-      return {
-        ...neutral,
-        is_exit: true,
-        position_id: x.position_id,
-        entry_price: x.entry_price,
-        position_type: x.type,
-        pnl_pct: x.realized_pnl ?? 0,
-        exits: exits.map(pos => toExitInfo(pos, p.close)),
+    const hasEntry = !!(entries && entries.length > 0)
+    const hasExit = !!(exits && exits.length > 0)
+    if (!hasEntry && !hasExit) return neutral
+
+    const bar: KlinePoint = { ...neutral }
+
+    if (hasExit) {
+      const x = exits![0]
+      bar.is_exit = true
+      bar.exits = exits!.map(pos => toExitInfo(pos, p.close))
+      // 平仓语义优先用于 ROI 展示：该 bar 的 pnl_pct 取已实现收益率
+      bar.position_id = x.position_id
+      bar.entry_price = x.entry_price
+      bar.position_type = x.type
+      bar.pnl_pct = x.realized_pnl ?? 0
+    }
+
+    if (hasEntry) {
+      const e = entries![0]
+      bar.is_entry = true
+      bar.entries = entries!.map(toEntryInfo)
+      // 仅当该 bar 不是平仓 bar 时，才把主字段指向新开的仓位；
+      // 同时既平又开时保留平仓的 pnl_pct，避免已实现收益被覆盖为 0。
+      if (!hasExit) {
+        bar.position_id = e.position_id
+        bar.entry_price = e.entry_price
+        bar.position_type = e.type
+        bar.pnl_pct = 0
       }
     }
-    return neutral
+
+    return bar
   })
 
   // 第二遍：为每个持仓填充持仓期间的浮动 ROI
+  //
+  // 定位开/平仓 bar 用 entries/exits 数组匹配，而非 bar.position_id——
+  // 连续开平仓时一根 bar 同时承载多笔（既是上一笔平仓又是下一笔开仓），
+  // bar.position_id 只能保存其中一个，用它匹配会漏掉其余仓位。
   for (const pos of positions) {
     // 找到开仓 bar（entry_time 为 null 的跨日仓位没有开仓标记）
     let entryIdx = -1
     for (let i = 0; i < result.length; i++) {
-      if (result[i].is_entry && result[i].position_id === pos.position_id) {
+      const bar = result[i]
+      if (bar.is_entry && bar.entries?.some(e => e.position_id === pos.position_id)) {
         entryIdx = i
         break
       }
@@ -227,7 +243,8 @@ export function mergePositions(kline: RawKlinePoint[], positions: DatedPosition[
     // 找到平仓 bar
     let exitIdx = -1
     for (let i = 0; i < result.length; i++) {
-      if (result[i].is_exit && result[i].position_id === pos.position_id) {
+      const bar = result[i]
+      if (bar.is_exit && bar.exits?.some(x => x.position_id === pos.position_id)) {
         exitIdx = i
         break
       }
@@ -240,7 +257,8 @@ export function mergePositions(kline: RawKlinePoint[], positions: DatedPosition[
     // 填充持仓期间每根 bar 的浮动 ROI（平仓 bar 保留 realized_pnl）
     for (let i = startIdx; i < endIdx; i++) {
       const bar = result[i]
-      if (bar.is_exit && bar.position_id === pos.position_id) continue
+      // 该 bar 是任一仓位的平仓点时，保留其已实现收益，不被浮动 ROI 覆盖
+      if (bar.is_exit) continue
 
       if (!bar.position_id) {
         bar.position_id = pos.position_id
