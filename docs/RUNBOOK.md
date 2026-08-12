@@ -19,8 +19,8 @@
                                                                       │ 符号链接
                                                                       ▼
                                                          ┌──────────────────────────┐
-                                                         │  trading-review-         │
-                                                         │  frontend/public/data    │
+                                                         │  strategy-dashboard/     │
+                                                         │  public/data             │
                                                          │  ─────────────────────── │
                                                          │  Vite dev server (:3000) │
                                                          └──────────────────────────┘
@@ -40,8 +40,8 @@
 ```bash
 # 1. 克隆项目
 cd /path/to/workspace
-git clone <repo-url> trading-review-frontend
-cd trading-review-frontend
+git clone <repo-url> strategy-dashboard
+cd strategy-dashboard
 
 # 2. 安装依赖
 npm install
@@ -69,7 +69,7 @@ npm run dev -- --host
 ### 更新前端代码
 
 ```bash
-cd /path/to/trading-review-frontend
+cd /path/to/strategy-dashboard
 git pull
 npm install        # 依赖有变更时
 # 重启 dev server

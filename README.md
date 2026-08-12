@@ -25,7 +25,7 @@ cta-strategy-code (数据源)
             ▲
             │ 符号链接 (public/data -> signal_comparison_output)
             ▼
-trading-review-frontend (本项目)
+strategy-dashboard (本项目)
   └── public/data/{date}/  ->  静态 fetch  ->  Vue 应用
 ```
 
@@ -71,7 +71,7 @@ npm run dev
 本项目通过符号链接直接读取数据源，无需额外同步：
 
 ```bash
-cd /path/to/trading-review-frontend
+cd /path/to/strategy-dashboard
 npm install
 npm run build
 

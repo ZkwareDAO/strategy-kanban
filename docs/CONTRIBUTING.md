@@ -13,8 +13,8 @@
 ### 初始化
 
 ```bash
-git clone <repo-url> trading-review-frontend
-cd trading-review-frontend
+git clone <repo-url> strategy-dashboard
+cd strategy-dashboard
 npm install
 
 # 建立数据符号链接（指向 cta-strategy-code 输出）
