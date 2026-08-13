@@ -19,7 +19,7 @@
                                                                       │ 符号链接
                                                                       ▼
                                                          ┌──────────────────────────┐
-                                                         │  strategy-dashboard/     │
+                                                         │  strategy-kanban/        │
                                                          │  public/data             │
                                                          │  ─────────────────────── │
                                                          │  Vite dev server (:3000) │
@@ -40,8 +40,8 @@
 ```bash
 # 1. 克隆项目
 cd /path/to/workspace
-git clone <repo-url> strategy-dashboard
-cd strategy-dashboard
+git clone <repo-url> strategy-kanban
+cd strategy-kanban
 
 # 2. 安装依赖
 npm install
@@ -69,7 +69,7 @@ npm run dev -- --host
 ### 更新前端代码
 
 ```bash
-cd /path/to/strategy-dashboard
+cd /path/to/strategy-kanban
 git pull
 npm install        # 依赖有变更时
 # 重启 dev server

@@ -45,15 +45,33 @@
         <div class="col-perf">
           <template v-if="getPerformance(summary.strategy)">
             <div class="perf-stats">
-              <span class="perf-item">总交易 <b>{{ getPerformance(summary.strategy)!.total_trades }}</b></span>
-              <span class="perf-item pos">盈 <b>{{ getPerformance(summary.strategy)!.winning_trades }}</b></span>
-              <span class="perf-item neg">亏 <b>{{ getPerformance(summary.strategy)!.losing_trades }}</b></span>
-              <span class="perf-item" :class="winRateClass(getPerformance(summary.strategy)!.win_rate)">
-                胜率 <b>{{ (getPerformance(summary.strategy)!.win_rate * 100).toFixed(1) }}%</b>
+              <!-- 已实现口径：仅含已平仓交易 -->
+              <template v-if="getPerformance(summary.strategy)!.total_trades > 0">
+                <span class="perf-item">总交易 <b>{{ getPerformance(summary.strategy)!.total_trades }}</b></span>
+                <span class="perf-item pos">盈 <b>{{ getPerformance(summary.strategy)!.winning_trades }}</b></span>
+                <span class="perf-item neg">亏 <b>{{ getPerformance(summary.strategy)!.losing_trades }}</b></span>
+                <span class="perf-item" :class="winRateClass(getPerformance(summary.strategy)!.win_rate)">
+                  胜率 <b>{{ (getPerformance(summary.strategy)!.win_rate * 100).toFixed(1) }}%</b>
+                </span>
+                <span class="perf-item" :class="pnlClass(getPerformance(summary.strategy)!.total_pnl)">
+                  盈亏 <b>{{ getPerformance(summary.strategy)!.total_pnl.toFixed(4) }}</b>
+                </span>
+              </template>
+              <span v-else class="perf-item muted">当日无已平仓交易</span>
+
+              <!-- 持仓中：浮动盈亏与已实现分离，避免未完成的交易污染上面的数字 -->
+              <span
+                v-if="(getPerformance(summary.strategy)!.open_trades ?? 0) > 0"
+                class="perf-item open"
+                title="持仓中的仓位尚未平仓，浮盈随行情变动，不计入已实现指标"
+              >
+                持仓 <b>{{ getPerformance(summary.strategy)!.open_trades }}</b>
+                · 浮盈
+                <b :class="pnlClass(getPerformance(summary.strategy)!.floating_pnl ?? 0)">
+                  {{ (getPerformance(summary.strategy)!.floating_pnl ?? 0).toFixed(4) }}
+                </b>
               </span>
-              <span class="perf-item" :class="pnlClass(getPerformance(summary.strategy)!.total_pnl)">
-                盈亏 <b>{{ getPerformance(summary.strategy)!.total_pnl.toFixed(4) }}</b>
-              </span>
+
               <button class="detail-btn" @click="$emit('view-performance', summary.strategy)">详情</button>
             </div>
           </template>
@@ -316,6 +334,32 @@ function pnlClass(pnl: number): string {
 
 .perf-item.pos b { color: #16a34a; }
 .perf-item.neg b { color: #dc2626; }
+
+// 持仓中：与已实现指标视觉分隔，蓝色表示"进行中"而非盈/亏
+.perf-item.open {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: help;
+
+  b {
+    color: #1d4ed8;
+  }
+
+  // 浮动盈亏仍按盈/亏着色（pnlClass 返回 pos/neg）
+  b.pos {
+    color: #16a34a;
+  }
+
+  b.neg {
+    color: #dc2626;
+  }
+}
+
+.perf-item.muted {
+  color: #9ca3af;
+}
 
 .perf-empty {
   color: #d1d5db;

@@ -36,6 +36,22 @@
       </div>
 
       <span class="row-count">{{ strategyList.length }} 条策略</span>
+
+      <!-- 数据源诊断：兼容命中为中性提示（已计入统计），未关联为需处理提示（未计入） -->
+      <span
+        v-if="fallbackCount > 0"
+        class="diag diag-info"
+        :title="`以下仓位的实盘结算币与 manifest 配置不一致，已按 base 币兼容匹配并正常计入统计：\n\n${fallbackTip}`"
+      >
+        <span class="diag-icon">ⓘ</span>{{ fallbackCount }} 项按结算币兼容
+      </span>
+      <span
+        v-if="unmatchedCount > 0"
+        class="diag diag-warn"
+        :title="`以下仓位在 manifest 中找不到对应策略，无法判定运行模式，未计入统计：\n\n${unmatchedTip}`"
+      >
+        <span class="diag-icon">⚠</span>{{ unmatchedCount }} 项未关联模式
+      </span>
     </div>
 
     <div v-if="loading" class="state">加载中...</div>
@@ -85,7 +101,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getOrderPositions } from '@/api/performance'
 import { getRuntimesForDateRange } from '@/api/strategy'
-import { buildModeMap, filterPositionsByModes, positionModes, extractStrategyGroup, type SelectableMode } from '@/utils/modeFilter'
+import { buildModeIndex, filterPositionsByModes, resolveModes, dedupePositions, extractStrategyGroup, type SelectableMode, type ModeIndex } from '@/utils/modeFilter'
 import type { OrderPosition, StrategyPerformance } from '@/models/performance'
 import type { TradingMode } from '@/models/runtime'
 
@@ -99,7 +115,7 @@ const MODE_OPTIONS: { value: SelectableMode; label: string }[] = [
 const loading = ref(false)
 const error = ref('')
 const rawPositions = ref<OrderPosition[]>([])
-const modeMap = ref<Map<string, Set<TradingMode>>>(new Map())
+const modeIndex = ref<ModeIndex>({ exact: new Map(), byBase: new Map() })
 // 多选模式：默认全选，至少保留一个；点击已选中的模式会取消（若是最后一个则忽略）
 const selectedModes = ref<Set<SelectableMode>>(new Set(['live', 'smoking']))
 
@@ -190,26 +206,45 @@ interface StrategyRow extends StrategyPerformance {
   modes: SelectableMode[]
 }
 
-// ---- 聚合策略维度数据（按 dir_name 聚合，先按模式过滤）----
-const strategyList = computed<StrategyRow[]>(() => {
-  // 仅统计已平仓的期货交易 (deleted=1, pos_type=2)，再按选中模式集合过滤
+// ---- 过滤 + 诊断 ----
+// 仅统计已平仓的期货交易 (deleted=1, pos_type=2)；跨日快照去重后按选中模式过滤。
+// 结算币回退命中的仓位与精确命中同等计入，仅在 quoteFallbacks 中单独记录。
+const filterResult = computed(() => {
   const closed = rawPositions.value.filter((p) => p.deleted === 1 && p.pos_type === 2)
-  const filtered = filterPositionsByModes(closed, modeMap.value, selectedModes.value)
+  return filterPositionsByModes(dedupePositions(closed), modeIndex.value, selectedModes.value)
+})
+
+/** 结算币兼容命中数（已计入统计，仅作数据源不一致提示） */
+const fallbackCount = computed(() => filterResult.value.quoteFallbacks.length)
+const fallbackTip = computed(() =>
+  filterResult.value.quoteFallbacks
+    .map((f) => `${f.strategy} | ${f.asset} → manifest 中为 ${f.matchedSymbol}`)
+    .join('\n'),
+)
+
+/** 完全无法关联模式的仓位数（未计入统计） */
+const unmatchedCount = computed(() => filterResult.value.unmatched.length)
+const unmatchedTip = computed(() =>
+  filterResult.value.unmatched.map((u) => `${u.strategy} | ${u.asset}`).join('\n'),
+)
+
+// ---- 聚合策略维度数据（按 dir_name 聚合）----
+const strategyList = computed<StrategyRow[]>(() => {
   const map = new Map<string, StrategyRow>()
   const groupModes = new Map<string, Set<'live' | 'smoking'>>()
 
-  for (const p of filtered) {
+  for (const p of filterResult.value.positions) {
     const group = extractStrategyGroup(p.strategy_name)
     // 累计该策略命中的模式
-    const modes = positionModes(p, modeMap.value)
-    if (modes) {
+    const match = resolveModes(p, modeIndex.value)
+    if (match) {
       let gm = groupModes.get(group)
       if (!gm) {
         gm = new Set<'live' | 'smoking'>()
         groupModes.set(group, gm)
       }
-      if (modes.has('live')) gm.add('live')
-      if (modes.has('smoking')) gm.add('smoking')
+      if (match.modes.has('live')) gm.add('live')
+      if (match.modes.has('smoking')) gm.add('smoking')
     }
     const existing = map.get(group)
     if (existing) {
@@ -254,7 +289,7 @@ async function fetchData() {
       getRuntimesForDateRange(from, to),
     ])
     rawPositions.value = positions
-    modeMap.value = buildModeMap(runtimes)
+    modeIndex.value = buildModeIndex(runtimes)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -418,6 +453,33 @@ onMounted(fetchData)
 .row-count {
   font-size: 13px;
   color: #9ca3af;
+}
+
+// 数据源诊断提示：info 为中性（已计入统计），warn 为待处理（未计入统计）
+.diag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: help;
+  white-space: nowrap;
+
+  .diag-icon {
+    font-size: 13px;
+    line-height: 1;
+  }
+}
+
+.diag-info {
+  color: #6b7280;
+  background: #f3f4f6;
+}
+
+.diag-warn {
+  color: #b45309;
+  background: #fef3c7;
 }
 
 .state {

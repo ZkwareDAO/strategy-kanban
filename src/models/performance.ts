@@ -33,6 +33,14 @@ export interface StrategyPerformance {
   max_leverage: number
   /** 该策略在所选模式下的模式标签（live/smoking/...） */
   mode: PerformanceMode
+  /**
+   * 当日仍持仓的笔数（deleted=0）。
+   * 与上面的已实现口径分离统计——持仓中的交易尚未完成，
+   * 计入 total_trades/win_rate 会用未定的结果污染已实现指标。
+   */
+  open_trades?: number
+  /** 持仓中仓位的浮盈合计（随行情变动，非最终值） */
+  floating_pnl?: number
 }
 
 /** 策略+代币维度汇总 */

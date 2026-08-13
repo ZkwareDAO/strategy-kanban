@@ -56,24 +56,35 @@ const selectedDate = ref('')
 const activeTab = ref<'strategy' | 'backtest' | 'performance'>('strategy')
 const orderPositions = ref<OrderPosition[]>([])
 
-/** 按策略目录名聚合的绩效数据（key = dir_name，如 DOLPHINV2_4H_2） */
+/**
+ * 按策略目录名聚合的绩效数据（key = dir_name，如 DOLPHINV2_4H_2）
+ *
+ * 已平仓（deleted=1）与持仓中（deleted=0）分离统计：
+ * 持仓中的交易尚未完成，其 pnl_value 是随行情浮动的未实现盈亏，
+ * 计入 total_pnl/win_rate 会污染已实现指标，故单列 open_trades/floating_pnl。
+ */
 const performanceMap = computed<Record<string, StrategyPerformance>>(() => {
   const map = new Map<string, StrategyPerformance>()
   for (const p of orderPositions.value) {
-    if (p.deleted !== 1 || p.pos_type !== 2) continue
+    if (p.pos_type !== 2) continue
     // strategy_name 格式 {dir_name}_{SYMBOL}，去掉最后一段得到 dir_name
     const idx = p.strategy_name.lastIndexOf('_')
     const dirName = idx > 0 ? p.strategy_name.slice(0, idx) : p.strategy_name
     let perf = map.get(dirName)
     if (!perf) {
-      perf = { strategy_name: dirName, total_trades: 0, winning_trades: 0, losing_trades: 0, win_rate: 0, total_pnl: 0, max_leverage: 1, mode: 'live' }
+      perf = { strategy_name: dirName, total_trades: 0, winning_trades: 0, losing_trades: 0, win_rate: 0, total_pnl: 0, max_leverage: 1, mode: 'live', open_trades: 0, floating_pnl: 0 }
       map.set(dirName, perf)
     }
-    perf.total_trades++
-    if (p.pnl_value > 0) perf.winning_trades++
-    else if (p.pnl_value < 0) perf.losing_trades++
-    perf.total_pnl += p.pnl_value
-    if (p.leverage > perf.max_leverage) perf.max_leverage = p.leverage
+    if (p.deleted === 1) {
+      perf.total_trades++
+      if (p.pnl_value > 0) perf.winning_trades++
+      else if (p.pnl_value < 0) perf.losing_trades++
+      perf.total_pnl += p.pnl_value
+      if (p.leverage > perf.max_leverage) perf.max_leverage = p.leverage
+    } else {
+      perf.open_trades = (perf.open_trades ?? 0) + 1
+      perf.floating_pnl = (perf.floating_pnl ?? 0) + p.pnl_value
+    }
   }
   for (const perf of map.values()) {
     perf.win_rate = perf.total_trades > 0 ? perf.winning_trades / perf.total_trades : 0

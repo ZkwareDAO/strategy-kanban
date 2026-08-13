@@ -54,9 +54,9 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getOrderPositions } from '@/api/performance'
 import { getRuntimesForDateRange } from '@/api/strategy'
-import { buildModeMap, filterPositionsByModes, type SelectableMode } from '@/utils/modeFilter'
+import { buildModeIndex, filterPositionsByModes, dedupePositions, findRuntimeForAsset, type SelectableMode, type ModeIndex } from '@/utils/modeFilter'
 import type { OrderPosition, SymbolPerformance } from '@/models/performance'
-import type { Runtime, TradingMode } from '@/models/runtime'
+import type { Runtime } from '@/models/runtime'
 
 const props = defineProps<{
   strategyName: string
@@ -92,7 +92,7 @@ const tf = (route.query.tf as string) || '1h'
 const loading = ref(true)
 const error = ref('')
 const rawPositions = ref<OrderPosition[]>([])
-const modeMap = ref<Map<string, Set<TradingMode>>>(new Map())
+const modeIndex = ref<ModeIndex>({ exact: new Map(), byBase: new Map() })
 // 区间内所有运行实例，用于跳转蜡烛图时按 (dir_name, symbol, 模式) 反查 source_strategy / runtime_name
 const runtimes = ref<Runtime[]>([])
 
@@ -159,16 +159,22 @@ async function fetchData() {
       getOrderPositions(from, to),
       getRuntimesForDateRange(from, to),
     ])
-    modeMap.value = buildModeMap(rangeRuntimes)
+    modeIndex.value = buildModeIndex(rangeRuntimes)
     runtimes.value = rangeRuntimes
     // 1. 匹配策略组：strategy_name 以策略组名开头
     //    （如 DOLPHINV2_4H_2_DOGEUSDT 匹配 DOLPHINV2_4H_2）
-    // 2. 再按所选模式（生产/冒烟）过滤
+    // 2. 跨日快照去重（同一笔未平仓位在每日 CSV 中重复出现）
+    // 3. 再按所选模式（生产/冒烟）过滤
     const inStrategy = allPositions.filter(p => {
       if (p.strategy_name === props.strategyName) return true
       return p.strategy_name.startsWith(props.strategyName + '_')
     })
-    rawPositions.value = filterPositionsByModes(inStrategy, modeMap.value, selectedModes)
+    const result = filterPositionsByModes(
+      dedupePositions(inStrategy),
+      modeIndex.value,
+      selectedModes,
+    )
+    rawPositions.value = result.positions
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -176,20 +182,11 @@ async function fetchData() {
   }
 }
 
-// 按 (dir_name, symbol, 选中模式) 反查 runtime，用于跳转蜡烛图时补齐 dir/runtime
+// 按 (dir_name, asset, 选中模式) 反查 runtime，用于跳转蜡烛图时补齐 dir/runtime
 // 参数，使 TokenDetailV2 能加载开平仓点、回放、对比数据与策略逻辑（与每日收益入口一致）。
+// 支持结算币回退：仓位 asset 为 WLDUSDC 时也能找到 manifest 里的 WLDUSDT runtime。
 function findRuntime(symbol: string): Runtime | undefined {
-  const candidates = runtimes.value.filter(
-    r => r.dir_name === props.strategyName && r.symbol === symbol,
-  )
-  if (candidates.length === 0) return undefined
-  // 优先匹配当前选中的模式；单选时取对应模式，全选时优先 live 再 smoking
-  const modeOrder = Array.from(selectedModes)
-  for (const m of modeOrder) {
-    const hit = candidates.find(r => r.trading_mode === m)
-    if (hit) return hit
-  }
-  return candidates[0]
+  return findRuntimeForAsset(runtimes.value, props.strategyName, symbol, selectedModes)
 }
 
 function goCandle(symbol: string) {
@@ -197,11 +194,15 @@ function goCandle(symbol: string) {
   // route param strategy 用 source_strategy（策略内部名），用于匹配策略逻辑配置；
   // 没有 runtime 时回退为 dir_name，TokenDetailV2 会以纯K线模式展示。
   const sourceStrategy = runtime?.strategy ?? props.strategyName
+  // symbol 用 runtime.symbol 而非仓位 asset：数据文件目录按 manifest 的交易对命名，
+  // 结算币漂移时（仓位 WLDUSDC / 目录 WLDUSDT）用 asset 会让四条数据路径全部 404，
+  // 蜡烛图退化成纯K线。runtime 已由 findRuntimeForAsset 跨结算币找到，取其 symbol 才对得上磁盘。
+  const dataSymbol = runtime?.symbol ?? symbol
   router.push({
     name: 'TokenDetailV2',
     params: {
       strategy: sourceStrategy,
-      symbol,
+      symbol: dataSymbol,
     },
     query: {
       from: dateFrom,

@@ -29,7 +29,7 @@ npm -v
 
 ```bash
 git clone <仓库地址>
-cd strategy-dashboard
+cd strategy-kanban
 npm install
 ```
 
