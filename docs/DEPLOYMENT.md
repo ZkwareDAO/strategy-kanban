@@ -48,7 +48,8 @@ ln -s /绝对路径/你的数据目录/frontend_data public/frontend-data
 # 必需：K线行情数据（目录下按周期分子目录：1m/5m/15m/1h/4h/1d）
 ln -s /绝对路径/你的行情目录 public/kline-data
 
-# 可选：历史回测结果（仅"回测详情"页需要）
+# 可选：历史回测结果（"策略发现"页需要）
+# 目录结构：{策略}/{YYYYMMDD}/{HHMMSS}/{代币}/backtest_result.json
 ln -s /绝对路径/你的回测目录 public/backtest-output
 ```
 
@@ -139,7 +140,10 @@ npm run preview -- --host
 | ├─ 回放对比 | `backtest.json` | 显示"无回放数据" |
 | └─ 信号对比报告 | `comparison.json` | 不显示对比模块 |
 | 策略表现页 | `frontend-data/trading_data/*.csv` | 显示"暂无策略表现数据" |
-| 回测详情页 | `backtest-output/` | 显示空列表 |
+| 策略发现页（列表） | `backtest-output/**/backtest_result.json` | 显示"暂无回测数据" |
+| ├─ 代币列表 | 同上（按索引筛选，无额外文件） | 显示"该区间暂无回测数据" |
+| └─ 回测详情 | `backtest_result.json` | 指标显示 `-` |
+| &nbsp;&nbsp;&nbsp;&nbsp;└─ 权益曲线 | `backtest_equity.csv` | 显示"无权益曲线数据"，指标仍正常 |
 
 **最小可运行配置**：只要有 `manifest.json` + 一份对应交易对的 K 线 CSV，就能启动并查看蜡烛图。
 
@@ -221,6 +225,18 @@ echo 'fs.inotify.max_user_watches=524288' | sudo tee -a /etc/sysctl.conf
 ### 修改数据文件后页面没更新
 
 数据目录被排除在 HMR 之外（避免监听大量文件），需手动刷新浏览器。
+
+### 策略发现页显示"暂无回测数据"
+
+1. 检查软链接：`ls -la public/backtest-output`
+2. 确认目录层级是 `{策略}/{YYYYMMDD}/{HHMMSS}/{代币}/`（四层，缺一层扫不到）
+3. 确认叶子目录里有 `backtest_result.json` —— 只有它存在才算"回测完成"
+4. 若回测存在却不显示，检查 `signals_processed` 是否为 `0`（空回测按设计不展示）
+5. 查看索引是否生成：`cat public/backtest-output-index.json`，`entries` 应非空。索引在 `npm run dev` 启动时生成，新增回测后会自动刷新
+
+### 回测详情页没有权益曲线
+
+缺少 `backtest_equity.csv`，或其首行不是表头 `date,equity,cash`。该文件是可选的，其余指标不受影响。
 
 ---
 

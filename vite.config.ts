@@ -7,6 +7,7 @@ import {
   statSync,
   existsSync,
   realpathSync,
+  readFileSync,
   watch,
   writeFileSync,
   type FSWatcher,
@@ -31,7 +32,65 @@ function isDir(p: string): boolean {
   }
 }
 
-/** 扫描 backtest_output 目录树，收集存在 backtest_result.json 的 run */
+/** 列表页展示所需的指标字段（其余字段详情页自行读原始 result.json） */
+const SUMMARY_METRIC_KEYS = [
+  'annualized_return',
+  'roe',
+  'total_return',
+  'max_drawdown',
+  'win_rate',
+  'total_trades',
+  'sharpe_ratio',
+] as const
+
+/**
+ * 从 backtest_result.json 摘取列表页展示所需字段。
+ *
+ * 列表页原本要为每个代币单独拉取完整 result.json（约 36KB），保留全部历史后
+ * 请求数会随回测积累无上限增长；改为在索引里内嵌摘要，列表页只读一个索引文件。
+ *
+ * 解析失败返回空对象--该 run 仍进索引（目录结构完整即视为完成），
+ * 只是列表页对应单元格显示 "-"，不中断整个索引生成。
+ */
+function readSummary(resultPath: string): Partial<RawRun> {
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(resultPath, 'utf-8'))
+  } catch {
+    return {}
+  }
+  if (typeof raw !== 'object' || raw === null) return {}
+
+  const result = raw as Record<string, unknown>
+  const config = (result.config ?? {}) as Record<string, unknown>
+  const rawMetrics = (result.metrics ?? {}) as Record<string, unknown>
+
+  const metrics: Record<string, number> = {}
+  for (const key of SUMMARY_METRIC_KEYS) {
+    const value = rawMetrics[key]
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      metrics[key] = value
+    }
+  }
+
+  const pickString = (value: unknown): string | undefined =>
+    typeof value === 'string' && value ? value : undefined
+
+  return {
+    start_date: pickString(config.start_date),
+    end_date: pickString(config.end_date),
+    completed_at: pickString(result.end_time),
+    signals_processed:
+      typeof result.signals_processed === 'number' ? result.signals_processed : undefined,
+    metrics,
+  }
+}
+
+/**
+ * 扫描 backtest_output 目录树，收集存在 backtest_result.json 的 run。
+ *
+ * 保留全部历史 run（同一策略/代币的多次回测都收），并顺带读出摘要指标。
+ */
 function scanBacktestOutput(root: string): RawRun[] {
   const runs: RawRun[] = []
   for (const strategy of readdirSync(root)) {
@@ -46,8 +105,16 @@ function scanBacktestOutput(root: string): RawRun[] {
         for (const symbol of readdirSync(timeDir)) {
           const symDir = join(timeDir, symbol)
           if (!isDir(symDir)) continue
-          if (existsSync(join(symDir, 'backtest_result.json'))) {
-            runs.push({ strategy, symbol, date, time, hasResult: true })
+          const resultPath = join(symDir, 'backtest_result.json')
+          if (existsSync(resultPath)) {
+            runs.push({
+              strategy,
+              symbol,
+              date,
+              time,
+              hasResult: true,
+              ...readSummary(resultPath),
+            })
           }
         }
       }

@@ -137,7 +137,7 @@ V2 将 **K线数据** 与 **仓位数据** 解耦：只要存在 K线数据即�
 
 ## 回测详情（Backtest Details）
 
-页面1（`StrategyOverview`）顶部 `el-tabs` 增加「策略表格 / 回测详情」切换。「回测详情」为表格视图（不跳转页面2），展示每个 (策略, 代币) **最近一次完整回测**的重点指标。
+页面1（`StrategyOverview`）顶部 `el-tabs` 增加「策略表格 / 回测详情」切换。「回测详情」为策略发现三层视图，展示**全部历史回测记录**（不再只保留每个 (策略, 代币) 的最近一次），默认按完成时间倒序。
 
 ### 数据来源
 
@@ -154,6 +154,8 @@ backtest_output/<策略>/<YYYYMMDD>/<HHMMSS>/<代币>/
 
 同一天可能有多份回测（多个 `HHMMSS` 目录），未完成的回测只有 `backtest_signals.csv`、没有 `backtest_result.json`。
 
+对外的数据格式规范（开源用户视角）见 [DATA-SPEC.md 第 7 节](./DATA-SPEC.md)。
+
 ### 索引自动生成（零人工干预）
 
 回测由他人手动执行，无法保证每次回测后手动跑索引脚本，因此索引由 **Vite 插件**（`backtestIndexPlugin`，定义在 `vite.config.ts`）自动生成到 `public/backtest-output-index.json`（前端自有，已 gitignore）：
@@ -161,21 +163,48 @@ backtest_output/<策略>/<YYYYMMDD>/<HHMMSS>/<代币>/
 - `buildStart`：dev/build 启动时扫描一次，写索引。
 - `configureServer`：dev 期间用 `fs.watch`（解析符号链接真实路径，recursive）监听 `backtest_output`，**仅以 `backtest_result.json` 落盘作为完成信号**触发刷新（debounce 2.5s + throttle 10s）。未完成的回测不会触发。
 - 目录缺失只 `warn` 并写空索引，不中断启动。
+- 扫描时顺带读取每个 `backtest_result.json`，把列表页展示所需字段**内嵌进索引**（`readSummary`）。解析失败按无摘要处理，该 run 仍进索引（对应单元格显示 `-`），不中断整体生成。
 
-索引构建逻辑（纯函数 `src/utils/backtestIndex.ts` 的 `buildIndex`）：每个 (策略, 代币) 取**有 `backtest_result.json`** 的 run 中 date 最大、同 date 内 time 最大者；无 result.json 的 run 不参与。索引结构：
+内嵌摘要的原因：列表页原本为每个代币单独 fetch 一份约 36KB 的 `result.json`。保留全部历史后请求数从 38 涨到 95 且无上限增长；内嵌后前两层只读一个索引文件（实测 59.8KB），零额外请求。详情页仍读原始 `result.json`（需要全部字段）。
+
+索引构建逻辑（纯函数 `src/utils/backtestIndex.ts`）：
+
+- `buildIndex`：保留**全部**有 `backtest_result.json` 的 run，不做去重；按 (策略, 运行日期) 分配 `sweep`（同日轮次）；按完成时间倒序输出。
+- `groupRuns`：按 `strategy | start_date | end_date | date | sweep` 聚合成列表行，`signals_processed === 0` 的空回测过滤掉，按完成时间倒序。
+
+`sweep` 的作用：脚本逐代币启动回测，同一批次的 `HHMMSS` 相差仅几秒（实测 77 个批次里 68 个只含 1 个代币），若按 `HHMMSS` 分行会碎片化；但同日同代币的重跑（实测 14 个 run，指标确实不同，如 `obv_atr_v2/20260623/BTCUSDT` 年化 0.568 vs 0.621）又必须各自保留。因此按 `time` 升序贪心分配：每个 run 归入第一个"尚无该代币"的轮次。实测 87 个非空 run → 17 行，零丢失，每行内代币不重复。
+
+索引结构：
 
 ```jsonc
 {
-  "generated_at": "2026-08-04T08:51:22.374Z",
+  "generated_at": "2026-08-13T07:10:02.262Z",
   "entries": [
-    { "strategy": "cta_ict_v3", "symbol": "BTCUSDT", "date": "20260629", "time": "101907", "path": "cta_ict_v3/20260629/101907/BTCUSDT" }
+    {
+      "strategy": "cta_ict_v3", "symbol": "BTCUSDT",
+      "date": "20260629", "time": "101907",
+      "path": "cta_ict_v3/20260629/101907/BTCUSDT",
+      "sweep": 0,
+      "start_date": "2025-01-01", "end_date": "2026-06-29",
+      "completed_at": "2026-06-29T18:22:41",
+      "signals_processed": 492,
+      "metrics": { "annualized_return": 2.787, "roe": 2.8991, "total_return": 2.8991,
+                   "max_drawdown": 0.0238, "win_rate": 0.8861, "total_trades": 246,
+                   "sharpe_ratio": 2.6685 }
+    }
   ]
 }
 ```
 
 ### 表格展示
 
-`src/components/BacktestOverview.vue` 自取索引后并行拉取每个 run 的 `backtest_result.json`，展示 ROE / 总收益 / 年化 / 夏普 / 索提诺 / 最大回撤 / 胜率 / 盈亏比 / 交易次数等列。**字段缺失统一显示 `-`，不报错**。行点击弹出 `el-dialog` 查看完整明细。`signals_processed === 0` 的 run 不展示。
+三层结构（展示内容与样式已经客户确认，改动需谨慎）：
+
+1. `src/components/BacktestOverview.vue`——策略层：策略 / 代币 / 最佳年化 / 回测区间 / 完成时间。默认按完成时间倒序；行数超过 20 时显示 `el-pagination`（≤20 时不渲染，保持界面不变）。排序在全量上做完再切页。
+2. `src/views/BacktestTokenList.vue`——代币层：按 `strategy + 区间 + date + sweep` 精确定位到某一次历史回测，展示年化 / ROE / 总收益 / 最大回撤 / 胜率 / 交易次数 / 夏普。缺少 `date`/`sweep` 的旧链接退化为按区间匹配，并用 `pickLatestPerSymbol` 对每个代币只保留最新一次——否则同一代币会因多次历史回测重复成行（该页以 symbol 作为渲染 key，重复会导致渲染异常）。
+3. `src/views/BacktestDetail.vue`——详情层：权益曲线（叠加日线收盘价与回撤）+ 指标卡片，按 `path` 读原始 `result.json`，天然支持任意历史 run。
+
+**字段缺失统一显示 `-`，不报错**。`signals_processed === 0` 的 run 不展示。
 
 ### inotify / ENOSPC 注意
 
@@ -192,7 +221,7 @@ backtest_output/<策略>/<YYYYMMDD>/<HHMMSS>/<代币>/
 | 仓位索引 | `cat public/data/$(date +%Y%m%d)/pnl/positions_index.json` 有 runtimes |
 | 回测索引 | `cat public/data/$(date +%Y%m%d)/backtest_results/index.json` 有 runs |
 | 回测输出符号链接 | `ls -la public/backtest-output` 应显示 `->` 指向 `backtest_output` |
-| 回测详情索引 | `cat public/backtest-output-index.json` 有 entries（dev 启动时自动生成） |
+| 策略发现索引 | `cat public/backtest-output-index.json` 有 entries（dev 启动时自动生成），每条应含 `sweep` 与 `metrics` |
 
 ## 常见问题
 

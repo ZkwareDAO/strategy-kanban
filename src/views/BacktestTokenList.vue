@@ -65,8 +65,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getBacktestIndex, getBacktestResult } from '@/api/backtest'
-import type { BacktestResult, BacktestOutputEntry } from '@/models/backtest'
+import { getBacktestIndex } from '@/api/backtest'
+import { pickLatestPerSymbol } from '@/utils/backtestIndex'
+import type { BacktestOutputEntry } from '@/models/backtest'
 
 const route = useRoute()
 const router = useRouter()
@@ -74,6 +75,9 @@ const router = useRouter()
 const strategy = (route.query.strategy as string) ?? ''
 const startDate = (route.query.start_date as string) ?? ''
 const endDate = (route.query.end_date as string) ?? ''
+// 定位到具体这一次历史回测：同一策略/区间可能跑过多次
+const runDate = (route.query.date as string) ?? ''
+const runSweep = (route.query.sweep as string) ?? ''
 
 interface TokenRow {
   symbol: string
@@ -112,27 +116,32 @@ async function fetchData() {
   loading.value = true
   error.value = ''
   try {
+    // 索引已内嵌展示所需指标，无需逐个拉取 backtest_result.json
     const entries = await getBacktestIndex()
-    const sameStrategy = entries.filter(e => e.strategy === strategy)
-    // 逐条取 result，匹配同一回测区间
-    const withResults = await Promise.all(
-      sameStrategy.map(async e => ({ entry: e, result: await getBacktestResult(e.path) })),
-    )
-    const matched = withResults.filter(
-      (x): x is { entry: BacktestOutputEntry; result: BacktestResult } =>
-        !!x.result &&
-        x.result.config?.start_date === startDate &&
-        x.result.config?.end_date === endDate,
-    )
-    tokenRows.value = matched.map(({ entry, result }) => ({
+    const inInterval = entries.filter(e => {
+      if (e.strategy !== strategy) return false
+      if ((e.start_date ?? '?') !== startDate || (e.end_date ?? '?') !== endDate) return false
+      return e.signals_processed !== 0
+    })
+    // 有 date/sweep 时精确定位到某一次历史回测；
+    // 缺省（旧链接）时退化为按区间匹配，并对每个代币只保留最新一次，避免重复成行
+    const hasRunParams = Boolean(runDate || runSweep)
+    const matched = hasRunParams
+      ? inInterval.filter(e => {
+          if (runDate && e.date !== runDate) return false
+          if (runSweep && String(e.sweep ?? 0) !== runSweep) return false
+          return true
+        })
+      : pickLatestPerSymbol(inInterval)
+    tokenRows.value = matched.map(entry => ({
       symbol: entry.symbol,
-      annualized_return: result.metrics?.annualized_return ?? null,
-      roe: result.metrics?.roe ?? null,
-      total_return: result.metrics?.total_return ?? null,
-      max_drawdown: result.metrics?.max_drawdown ?? null,
-      win_rate: result.metrics?.win_rate ?? null,
-      total_trades: result.metrics?.total_trades ?? null,
-      sharpe_ratio: result.metrics?.sharpe_ratio ?? null,
+      annualized_return: entry.metrics?.annualized_return ?? null,
+      roe: entry.metrics?.roe ?? null,
+      total_return: entry.metrics?.total_return ?? null,
+      max_drawdown: entry.metrics?.max_drawdown ?? null,
+      win_rate: entry.metrics?.win_rate ?? null,
+      total_trades: entry.metrics?.total_trades ?? null,
+      sharpe_ratio: entry.metrics?.sharpe_ratio ?? null,
       entry,
     }))
   } catch (e) {

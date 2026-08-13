@@ -98,7 +98,26 @@ export interface BacktestResult {
 }
 
 /**
- * 回测索引条目：一个 (策略, 代币) 的最新完整回测定位
+ * 索引条目内嵌的摘要指标：仅列表页展示所需的字段。
+ *
+ * 由索引生成器从 backtest_result.json 的 metrics 中摘取，
+ * 避免列表页为每个代币单独拉取完整 result.json（单文件约 36KB）。
+ * 全部可选--缺失时前端显示 "-"。
+ */
+export interface BacktestSummaryMetrics {
+  annualized_return?: number
+  roe?: number
+  total_return?: number
+  max_drawdown?: number
+  win_rate?: number
+  total_trades?: number
+  sharpe_ratio?: number
+}
+
+/**
+ * 回测索引条目：一次完整回测（run）的定位 + 展示摘要。
+ *
+ * 保留全部历史 run--同一 (策略, 代币) 的多次回测各占一条。
  */
 export interface BacktestOutputEntry {
   /** 策略目录名，如 cta_ict_v3 */
@@ -111,6 +130,23 @@ export interface BacktestOutputEntry {
   time: string
   /** 相对 backtest-output 的路径，如 cta_ict_v3/20260629/101907/BTCUSDT */
   path: string
+  /**
+   * 同日轮次（从 0 开始）：区分同一天内对同一代币的重跑。
+   *
+   * 脚本逐代币启动回测，同一批次的 HHMMSS 相差仅几秒，因此不能按 HHMMSS 分组。
+   * 轮次按 time 升序贪心分配--每个 run 归入第一个"尚无该代币"的轮次。
+   */
+  sweep: number
+  /** 回测区间开始日期（backtest_result.config.start_date） */
+  start_date?: string
+  /** 回测区间结束日期（backtest_result.config.end_date） */
+  end_date?: string
+  /** 完成时间（backtest_result.end_time），缺失时回退为 `${date}T${time}` */
+  completed_at?: string
+  /** 处理的信号数；为 0 表示空回测，前端不展示 */
+  signals_processed?: number
+  /** 列表页展示所需的摘要指标 */
+  metrics?: BacktestSummaryMetrics
 }
 
 /**
@@ -123,10 +159,11 @@ export interface BacktestOutputIndex {
 }
 
 /**
- * 策略发现页的策略层级分组行：同一策略 + 同一回测区间合并成一行。
+ * 策略发现页的策略层级分组行。
  *
- * 分组键 = `${strategy}|${start_date}|${end_date}`。
- * 同一策略若有不同回测区间，则拆成多行。
+ * 分组键 = `${strategy}|${start_date}|${end_date}|${date}|${sweep}`：
+ * 同一策略的同一回测区间，若在不同日期运行或同日重跑，各自拆成独立行，
+ * 从而保留全部历史记录。
  */
 export interface BacktestGroupRow {
   /** 策略目录名，如 obv_atr_v2 */
@@ -135,11 +172,15 @@ export interface BacktestGroupRow {
   symbols: string[]
   /** 组内最佳年化收益（取所有代币 annualized_return 的最大值） */
   best_annualized: number
-  /** 回测区间开始日期（backtest_result.config.start_date） */
+  /** 回测区间开始日期 */
   start_date: string
-  /** 回测区间结束日期（backtest_result.config.end_date） */
+  /** 回测区间结束日期 */
   end_date: string
-  /** 完成时间（组内最新 end_time，回退为索引 date+time） */
+  /** 运行日期 YYYYMMDD（分组键的一部分） */
+  date: string
+  /** 同日轮次（分组键的一部分） */
+  sweep: number
+  /** 完成时间（组内最新 completed_at） */
   completed_at: string
   /** 该组下每个代币的索引条目（供代币层列表页跳转） */
   token_entries: BacktestOutputEntry[]

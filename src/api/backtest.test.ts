@@ -23,7 +23,11 @@ describe('backtest API', () => {
       const entries = await getBacktestIndex()
       expect(entries).toHaveLength(1)
       expect(entries[0].strategy).toBe('cta_ict_v3')
-      expect(mockFetch).toHaveBeenCalledWith('/backtest-output-index.json')
+      // 带时间戳绕过浏览器缓存，确保拿到刚重新生成的索引
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/backtest-output-index\.json\?t=\d+$/),
+        { cache: 'no-store' },
+      )
     })
 
     it('returns empty array when response not ok', async () => {

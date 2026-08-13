@@ -27,8 +27,13 @@ public/
 │   └── {period}/                   # 1m / 5m / 15m / 30m / 1h / 2h / 4h / 8h / 1d
 │       └── {SYMBOL}_{period}.csv   # 如 BTCUSDT_1m.csv
 │
-└── backtest-output/                # 历史回测结果（可选）
-    └── ...
+└── backtest-output/                # 历史回测结果（可选，策略发现页需要）
+    └── {strategy}/                 # 策略目录名，如 cta_ict_v3
+        └── {YYYYMMDD}/             # 回测启动日期
+            └── {HHMMSS}/           # 回测启动时刻
+                └── {SYMBOL}/       # 交易对，如 BTCUSDT
+                    ├── backtest_result.json   # 必需，同时作为"回测完成"标志
+                    └── backtest_equity.csv    # 可选，权益曲线
 ```
 
 ### 目录说明
@@ -37,7 +42,7 @@ public/
 |---------|------|------|
 | `public/frontend-data` | 是 | 策略、持仓、对比、策略表现数据，按本规范组织 |
 | `public/kline-data` | 是 | K线 CSV 文件，按周期分目录 |
-| `public/backtest-output` | 否 | 回测结果，用于回测详情页 |
+| `public/backtest-output` | 否 | 历史回测结果，用于策略发现页（三层：策略列表 → 代币列表 → 回测详情） |
 
 这些路径可以直接是真实目录，也可以是指向外部数据目录的符号链接。
 
@@ -299,6 +304,208 @@ timestamp,open,high,low,close,volume
 
 ---
 
+### 7. 回测数据（backtest-output）
+
+策略发现页的数据源。与前 6 项按日期组织的每日数据不同，回测是**按需触发**的：每跑一次回测就新增一个目录，**全部历史记录都会保留并展示**。
+
+> 与第 3 节的 `backtest.json` 不是一回事：那是**当日**回放交易点（叠加在 K 线图上），本节是**独立的历史回测报告**。
+
+#### 目录结构
+
+```
+backtest-output/{strategy}/{YYYYMMDD}/{HHMMSS}/{SYMBOL}/
+├── backtest_result.json   # 必需
+└── backtest_equity.csv    # 可选
+```
+
+| 层级 | 含义 | 示例 |
+|------|------|------|
+| `{strategy}` | 策略目录名，前端直接作为策略名展示 | `cta_ict_v3` |
+| `{YYYYMMDD}` | 回测**启动日期** | `20260629` |
+| `{HHMMSS}` | 回测**启动时刻**，同日多次回测靠它区分 | `101907` |
+| `{SYMBOL}` | 交易对 | `BTCUSDT` |
+
+| 文件 | 必需 | 说明 |
+|------|------|------|
+| `backtest_result.json` | 是 | 配置、指标、账户信息。**同时作为"回测完成"的标志**：只有存在此文件的目录才会被索引 |
+| `backtest_equity.csv` | 否 | 权益曲线，缺失时详情页不绘制曲线，其余指标正常显示 |
+
+> 目录内的其他文件（如成交明细、信号明细、图片）前端不读取，可自由保留。
+>
+> **未完成的回测请勿写入 `backtest_result.json`** —— 前端以该文件的存在作为完成信号，回测中途的目录会被自动忽略，无需额外的状态标记。
+
+#### backtest_result.json
+
+所有字段都是可选的，缺失时前端显示 `-`。最小可用集合为 `config.start_date`、`config.end_date` 和 `metrics.annualized_return`（否则列表页的区间与年化列为空）。
+
+```json
+{
+  "config": {
+    "name": "ICT_1D_3_BTCUSDT 回测",
+    "start_date": "2025-01-01",
+    "end_date": "2026-06-29",
+    "initial_cash": 100000,
+    "symbols": ["BTCUSDT"]
+  },
+  "start_time": "2026-06-29T10:19:07",
+  "end_time": "2026-06-29T18:22:41",
+  "duration_seconds": 29014.5,
+  "status": "success",
+  "signals_processed": 492,
+  "trades_count": 492,
+  "klines_processed": 536186,
+  "accounts": [
+    {
+      "strategy_id": "ICT_1D_3_BTCUSDT",
+      "cash": 289918.32,
+      "total_equity": 389918.32,
+      "peak_equity": 391204.11,
+      "max_drawdown": 0.0239,
+      "position_count": 0,
+      "trade_count": 246
+    }
+  ],
+  "metrics": {
+    "total_return": 2.8991,
+    "roe": 2.8991,
+    "annualized_return": 2.787,
+    "sharpe_ratio": 2.6685,
+    "sortino_ratio": 16.2332,
+    "max_drawdown": 0.0238,
+    "win_rate": 0.8861,
+    "profit_factor": 8.7068,
+    "total_trades": 246,
+    "winning_trades": 218,
+    "losing_trades": 28,
+    "avg_trade_pnl": 1178.53,
+    "largest_win": 9466.43,
+    "largest_loss": -4681.94,
+    "avg_win": 1502.46,
+    "avg_loss": 1343.5,
+    "trading_days": 373
+  }
+}
+```
+
+**顶层字段**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `config.start_date` | string | 回测区间开始日期 `YYYY-MM-DD`。**同时是列表页的分组键之一** |
+| `config.end_date` | string | 回测区间结束日期 `YYYY-MM-DD`。同上 |
+| `config.initial_cash` | number | 初始资金 |
+| `config.symbols` | string[] | 本次回测的交易对列表 |
+| `config.name` | string | 回测名称，前端不展示，可自定义 |
+| `start_time` | string | 回测开始时间（ISO 8601） |
+| `end_time` | string | 回测结束时间（ISO 8601）。**作为列表页"完成时间"列与默认排序依据**；缺失时回退为目录的 `{YYYYMMDD}T{HHMMSS}` |
+| `duration_seconds` | number | 回测耗时（秒） |
+| `status` | string | 运行状态，如 `success` |
+| `signals_processed` | number | 处理的信号数。**为 `0` 时前端不展示该回测**（空回测） |
+| `trades_count` | number | 成交笔数 |
+| `klines_processed` | number | 处理的 K 线根数 |
+| `accounts[0]` | object | 账户快照，前端取第一个元素 |
+
+**accounts[0] 字段**（全部可选，仅详情页展示）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `strategy_id` | string | 策略实例标识 |
+| `cash` | number | 期末可用资金 |
+| `total_equity` | number | 期末总权益 |
+| `peak_equity` | number | 峰值权益 |
+| `max_drawdown` | number | 最大回撤（小数，`0.0239` = 2.39%） |
+| `position_count` | number | 期末持仓数 |
+| `trade_count` | number | 成交笔数 |
+
+**metrics 字段**（全部可选。比率类均为**小数**，前端乘 100 显示为百分比）
+
+| 字段 | 类型 | 展示位置 | 说明 |
+|------|------|---------|------|
+| `annualized_return` | number | 三层均展示 | 年化收益率。列表页的「最佳年化」取组内各代币的最大值 |
+| `roe` | number | 代币层、详情页 | 净资产收益率 |
+| `total_return` | number | 代币层、详情页 | 总收益率 |
+| `max_drawdown` | number | 代币层、详情页 | 最大回撤 |
+| `win_rate` | number | 代币层、详情页 | 胜率 |
+| `total_trades` | number | 代币层、详情页 | 总交易数 |
+| `sharpe_ratio` | number | 代币层、详情页 | 夏普比率（原值，不转百分比） |
+| `sortino_ratio` | number | 详情页 | 索提诺比率 |
+| `profit_factor` | number | 详情页 | 盈亏比 |
+| `winning_trades` / `losing_trades` | number | 详情页 | 盈利 / 亏损交易数 |
+| `avg_trade_pnl` | number | 详情页 | 平均每笔盈亏（金额） |
+| `largest_win` / `largest_loss` | number | 详情页 | 最大单笔盈利 / 亏损（金额） |
+| `avg_win` / `avg_loss` | number | 详情页 | 平均盈利 / 亏损（金额） |
+| `trading_days` | number | 详情页 | 交易天数 |
+
+> 前 7 项会被索引生成器摘取到 `backtest-output-index.json` 中，供列表页直接读取；其余字段由详情页按需读取原始 JSON。metrics 允许包含表中未列出的自定义字段，前端忽略。
+
+#### backtest_equity.csv
+
+权益曲线，**首行必须是表头**（前端以 `date` 开头校验，否则视为无效数据）。
+
+```csv
+date,equity,cash
+2025-01-01,100000,100000
+2025-01-02,100523.4,80523.4
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `date` | string | 日期 `YYYY-MM-DD` |
+| `equity` | number | 当日总权益 |
+| `cash` | number | 当日可用资金 |
+
+详情页把权益曲线与同期日线收盘价（读 `kline-data/1d/{SYMBOL}_1d.csv`）叠加对比，并据此计算回撤曲线。
+
+#### 历史记录与分组规则
+
+前端保留**全部**历史回测，列表页按以下规则把 run 聚合成行：
+
+**分组键 = 策略 + 回测区间 + 启动日期 + 同日轮次**
+
+「同日轮次」是自动推导的，无需在数据中标记：同一策略同一天内的 run 按 `{HHMMSS}` 升序处理，每个 run 归入第一个"尚未包含该交易对"的轮次。因此：
+
+| 数据情况 | 列表页表现 |
+|---------|-----------|
+| 一天跑一批多个代币（各代币 `{HHMMSS}` 不同） | 合并为 **1 行**，代币聚合展示 |
+| 同一代币当天重跑一次 | 拆成 **2 行**，各有独立的完成时间与指标 |
+| 不同日期运行 | 各自成行 |
+| 相同日期但回测区间不同 | 各自成行 |
+
+这样逐个代币启动回测（`{HHMMSS}` 相差几秒）不会让列表碎片化，同时同一代币的重跑记录也不会被覆盖。
+
+列表默认按**完成时间倒序**（最新的回测在最前）。行数超过 20 时自动分页。
+
+#### 索引文件
+
+`public/backtest-output-index.json` 由 Vite 插件在启动时自动扫描生成，**无需手动维护**，也不要提交到版本库。开发期间新的回测完成后会自动刷新。
+
+其结构由前端自动产生，仅供参考：
+
+```jsonc
+{
+  "generated_at": "2026-08-13T07:10:02.262Z",
+  "entries": [
+    {
+      "strategy": "cta_ict_v3",
+      "symbol": "BTCUSDT",
+      "date": "20260629",          // 目录名
+      "time": "101907",            // 目录名
+      "path": "cta_ict_v3/20260629/101907/BTCUSDT",
+      "sweep": 0,                  // 同日轮次（自动推导）
+      "start_date": "2025-01-01",
+      "end_date": "2026-06-29",
+      "completed_at": "2026-06-29T18:22:41",
+      "signals_processed": 492,
+      "metrics": { "annualized_return": 2.787, "roe": 2.8991, "total_return": 2.8991,
+                   "max_drawdown": 0.0238, "win_rate": 0.8861, "total_trades": 246,
+                   "sharpe_ratio": 2.6685 }
+    }
+  ]
+}
+```
+
+---
+
 ## 策略配置格式
 
 除数据文件外，前端还需要一份策略配置，用于展示策略的中文名称、逻辑说明和默认技术指标。配置位于前端源码 `src/config/strategies.ts`，部署前根据自有策略编辑。
@@ -425,6 +632,8 @@ const STRATEGY_DIR_MAP: Record<string, string> = {
 - [ ] `public/frontend-data/YYYYMMDD/{strategy}/{SYMBOL}/comparison.json` — 对比报告（可选）
 - [ ] `public/frontend-data/trading_data/trading_positions_YYYYMMDD.csv` — 策略表现数据（可选，需要"策略表现"页时准备）
 - [ ] `public/kline-data/{period}/{SYMBOL}_{period}.csv` — K线行情
+- [ ] `public/backtest-output/{strategy}/{YYYYMMDD}/{HHMMSS}/{SYMBOL}/backtest_result.json` — 回测结果（可选，需要"策略发现"页时准备）
+- [ ] `public/backtest-output/.../backtest_equity.csv` — 回测权益曲线（可选，详情页曲线需要）
 - [ ] `src/config/strategies.ts` 中添加了自有策略的配置
 
 **最低运行要求**：只要有 `manifest.json`、`positions.json`（可为空数组）和 K线 CSV，前端即可运行并展示 K 线图。其他数据文件按需提供，缺失时前端优雅降级。

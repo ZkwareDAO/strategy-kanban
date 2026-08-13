@@ -46,7 +46,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="g in sortedGroups" :key="groupKey(g)">
+          <tr v-for="g in pagedGroups" :key="groupKey(g)">
             <td class="col-name">{{ g.strategy }}</td>
             <td class="col-tokens">
               <span v-for="(sym, i) in g.symbols" :key="sym" class="token-chip">
@@ -62,88 +62,57 @@
           </tr>
         </tbody>
       </table>
+
+      <!-- 分页：仅在行数超过一页时出现，行数少时界面与原先完全一致 -->
+      <div v-if="showPagination" class="pagination-bar">
+        <el-pagination
+          v-model:current-page="currentPage"
+          :page-size="PAGE_SIZE"
+          :total="sortedGroups.length"
+          layout="prev, pager, next, total"
+          background
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { getBacktestIndex, getBacktestResult } from '@/api/backtest'
-import type { BacktestResult, BacktestOutputEntry, BacktestGroupRow } from '@/models/backtest'
+import { getBacktestIndex } from '@/api/backtest'
+import { groupRuns } from '@/utils/backtestIndex'
+import type { BacktestOutputEntry, BacktestGroupRow } from '@/models/backtest'
 
 const router = useRouter()
 
-interface LoadedRow {
-  strategy: string
-  symbol: string
-  date: string
-  time: string
-  path: string
-  result: BacktestResult | null
-}
+/** 超过此行数才显示分页条--数据少时界面保持零变化 */
+const PAGE_SIZE = 20
 
 const loading = ref(false)
-const rows = ref<LoadedRow[]>([])
+const entries = ref<BacktestOutputEntry[]>([])
 const selectedStrategy = ref('')
+const currentPage = ref(1)
 
 type SortKey = 'strategy' | 'best_annualized' | 'interval' | 'completed_at'
-const sortKey = ref<SortKey>('best_annualized')
+// 默认按完成时间倒序：最新的回测排在最前
+const sortKey = ref<SortKey>('completed_at')
 const sortAsc = ref(false)
 
 const availableStrategies = computed(() => {
-  const set = new Set(rows.value.map(r => r.strategy))
+  const set = new Set(entries.value.map(e => e.strategy))
   return Array.from(set).sort()
 })
 
-// 按 strategy + 回测区间 分组
-const groups = computed<BacktestGroupRow[]>(() => {
-  const map = new Map<string, BacktestGroupRow>()
-  for (const r of rows.value) {
-    if (!r.result) continue
-    const sd = r.result.config?.start_date ?? '?'
-    const ed = r.result.config?.end_date ?? '?'
-    const key = `${r.strategy}|${sd}|${ed}`
-    let g = map.get(key)
-    if (!g) {
-      g = {
-        strategy: r.strategy,
-        symbols: [],
-        best_annualized: -Infinity,
-        start_date: sd,
-        end_date: ed,
-        completed_at: '',
-        token_entries: [],
-      }
-      map.set(key, g)
-    }
-    g.symbols.push(r.symbol)
-    const ar = r.result.metrics?.annualized_return
-    if (typeof ar === 'number' && Number.isFinite(ar)) {
-      g.best_annualized = Math.max(g.best_annualized, ar)
-    }
-    // 完成时间：end_time 优先，回退为索引 date+time
-    const ts = r.result.end_time || `${r.date}T${r.time}`
-    if (ts > g.completed_at) g.completed_at = ts
-    g.token_entries.push({
-      strategy: r.strategy,
-      symbol: r.symbol,
-      date: r.date,
-      time: r.time,
-      path: r.path,
-    } as BacktestOutputEntry)
-  }
-  for (const g of map.values()) {
-    g.symbols.sort()
-  }
-  return Array.from(map.values())
-})
+// 分组：策略 + 回测区间 + 运行日期 + 同日轮次，保留全部历史记录
+const groups = computed<BacktestGroupRow[]>(() => groupRuns(entries.value))
 
 const filteredGroups = computed(() => {
   if (!selectedStrategy.value) return groups.value
   return groups.value.filter(g => g.strategy === selectedStrategy.value)
 })
 
+// 排序在全量上做完，再切页--否则分页会把排序切成"仅当前页有序"
 const sortedGroups = computed(() => {
   const arr = [...filteredGroups.value]
   const dir = sortAsc.value ? 1 : -1
@@ -171,6 +140,28 @@ const sortedGroups = computed(() => {
   return arr
 })
 
+/** 分页条仅在行数超过一页时出现 */
+const showPagination = computed(() => sortedGroups.value.length > PAGE_SIZE)
+
+const pagedGroups = computed(() => {
+  if (!showPagination.value) return sortedGroups.value
+  const start = (currentPage.value - 1) * PAGE_SIZE
+  return sortedGroups.value.slice(start, start + PAGE_SIZE)
+})
+
+/** 总页数（无数据时按 1 页算，避免 currentPage 归零） */
+const pageCount = computed(() => Math.max(1, Math.ceil(sortedGroups.value.length / PAGE_SIZE)))
+
+// 筛选或排序变化后回到第一页，避免停在越界的空页
+watch([selectedStrategy, sortKey, sortAsc], () => {
+  currentPage.value = 1
+})
+
+// 数据刷新（dev 期间索引更新）后行数可能变少，把越界的页码收回到最后一页
+watch(pageCount, count => {
+  if (currentPage.value > count) currentPage.value = count
+})
+
 function toggleSort(key: SortKey) {
   if (sortKey.value === key) {
     sortAsc.value = !sortAsc.value
@@ -187,7 +178,7 @@ function sortArrow(key: SortKey): string {
 }
 
 function groupKey(g: BacktestGroupRow): string {
-  return `${g.strategy}|${g.start_date}|${g.end_date}`
+  return `${g.strategy}|${g.start_date}|${g.end_date}|${g.date}|${g.sweep}`
 }
 
 function stripUsdt(symbol: string): string {
@@ -219,31 +210,18 @@ function goTokenList(g: BacktestGroupRow) {
       strategy: g.strategy,
       start_date: g.start_date,
       end_date: g.end_date,
+      // 定位到具体这一次历史回测（同区间可能跑过多次）
+      date: g.date,
+      sweep: String(g.sweep),
     },
   })
-}
-
-// 没有信号的空回测不展示（保留与原逻辑一致）
-function hasSignals(result: BacktestResult): boolean {
-  const sp = result.signals_processed
-  return sp === undefined || sp > 0
 }
 
 async function loadRows() {
   loading.value = true
   try {
-    const entries = await getBacktestIndex()
-    const fetched = await Promise.all(
-      entries.map(async e => ({
-        strategy: e.strategy,
-        symbol: e.symbol,
-        date: e.date,
-        time: e.time,
-        path: e.path,
-        result: await getBacktestResult(e.path),
-      })),
-    )
-    rows.value = fetched.filter(r => r.result && hasSignals(r.result))
+    // 索引已内嵌展示所需指标，无需逐个拉取 backtest_result.json
+    entries.value = await getBacktestIndex()
   } finally {
     loading.value = false
   }
@@ -298,6 +276,13 @@ if (import.meta.hot) {
 
 .table-wrapper {
   overflow-x: auto;
+}
+
+.pagination-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 20px;
+  border-top: 1px solid #f0f0f0;
 }
 
 .group-table {
