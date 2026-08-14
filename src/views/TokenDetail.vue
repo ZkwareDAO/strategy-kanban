@@ -150,9 +150,9 @@ const tradingMode = computed(() => {
 
 const modeLabel = computed(() => {
   const map: Record<string, string> = {
-    live: '实盘',
-    paper_trading: '模拟盘',
-    smoking: '冒烟测试',
+    live: 'Product',
+    paper_trading: 'Paper',
+    smoking: 'Smoking',
   }
   return map[tradingMode.value] ?? ''
 })

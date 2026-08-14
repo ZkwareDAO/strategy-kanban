@@ -32,7 +32,7 @@
             <th class="sortable" @click="toggleSort('strategy')">
               策略名称 <span class="sort-arrow">{{ sortArrow('strategy') }}</span>
             </th>
-            <th>代币</th>
+            <th>标的</th>
             <th class="sortable" @click="toggleSort('best_annualized')">
               最佳年化 <span class="sort-arrow">{{ sortArrow('best_annualized') }}</span>
             </th>
@@ -50,7 +50,7 @@
             <td class="col-name">{{ g.strategy }}</td>
             <td class="col-tokens">
               <span v-for="(sym, i) in g.symbols" :key="sym" class="token-chip">
-                {{ stripUsdt(sym) }}<span v-if="i < g.symbols.length - 1" class="sep">|</span>
+                {{ formatSymbol(sym) }}<span v-if="i < g.symbols.length - 1" class="sep">|</span>
               </span>
             </td>
             <td :class="pctClass(g.best_annualized)">{{ fmtPct(g.best_annualized) }}</td>
@@ -82,6 +82,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getBacktestIndex } from '@/api/backtest'
 import { groupRuns } from '@/utils/backtestIndex'
+import { formatSymbol } from '@/utils/display'
 import type { BacktestOutputEntry, BacktestGroupRow } from '@/models/backtest'
 
 const router = useRouter()
@@ -179,10 +180,6 @@ function sortArrow(key: SortKey): string {
 
 function groupKey(g: BacktestGroupRow): string {
   return `${g.strategy}|${g.start_date}|${g.end_date}|${g.date}|${g.sweep}`
-}
-
-function stripUsdt(symbol: string): string {
-  return symbol.endsWith('USDT') ? symbol.slice(0, -4) : symbol
 }
 
 function formatCompletedAt(ts: string): string {

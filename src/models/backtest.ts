@@ -101,7 +101,7 @@ export interface BacktestResult {
  * 索引条目内嵌的摘要指标：仅列表页展示所需的字段。
  *
  * 由索引生成器从 backtest_result.json 的 metrics 中摘取，
- * 避免列表页为每个代币单独拉取完整 result.json（单文件约 36KB）。
+ * 避免列表页为每个标的单独拉取完整 result.json（单文件约 36KB）。
  * 全部可选--缺失时前端显示 "-"。
  */
 export interface BacktestSummaryMetrics {
@@ -117,12 +117,12 @@ export interface BacktestSummaryMetrics {
 /**
  * 回测索引条目：一次完整回测（run）的定位 + 展示摘要。
  *
- * 保留全部历史 run--同一 (策略, 代币) 的多次回测各占一条。
+ * 保留全部历史 run--同一 (策略, 标的) 的多次回测各占一条。
  */
 export interface BacktestOutputEntry {
   /** 策略目录名，如 cta_ict_v3 */
   strategy: string
-  /** 代币，如 BTCUSDT */
+  /** 标的，如 BTCUSDT */
   symbol: string
   /** 回测运行日期 YYYYMMDD（目录名） */
   date: string
@@ -131,10 +131,10 @@ export interface BacktestOutputEntry {
   /** 相对 backtest-output 的路径，如 cta_ict_v3/20260629/101907/BTCUSDT */
   path: string
   /**
-   * 同日轮次（从 0 开始）：区分同一天内对同一代币的重跑。
+   * 同日轮次（从 0 开始）：区分同一天内对同一标的的重跑。
    *
-   * 脚本逐代币启动回测，同一批次的 HHMMSS 相差仅几秒，因此不能按 HHMMSS 分组。
-   * 轮次按 time 升序贪心分配--每个 run 归入第一个"尚无该代币"的轮次。
+   * 脚本逐标的启动回测，同一批次的 HHMMSS 相差仅几秒，因此不能按 HHMMSS 分组。
+   * 轮次按 time 升序贪心分配--每个 run 归入第一个"尚无该标的"的轮次。
    */
   sweep: number
   /** 回测区间开始日期（backtest_result.config.start_date） */
@@ -168,9 +168,9 @@ export interface BacktestOutputIndex {
 export interface BacktestGroupRow {
   /** 策略目录名，如 obv_atr_v2 */
   strategy: string
-  /** 该组下所有代币（展示时用 `|` 连接） */
+  /** 该组下所有标的（展示时用 `|` 连接） */
   symbols: string[]
-  /** 组内最佳年化收益（取所有代币 annualized_return 的最大值） */
+  /** 组内最佳年化收益（取所有标的 annualized_return 的最大值） */
   best_annualized: number
   /** 回测区间开始日期 */
   start_date: string
@@ -182,6 +182,6 @@ export interface BacktestGroupRow {
   sweep: number
   /** 完成时间（组内最新 completed_at） */
   completed_at: string
-  /** 该组下每个代币的索引条目（供代币层列表页跳转） */
+  /** 该组下每个标的的索引条目（供标的层列表页跳转） */
   token_entries: BacktestOutputEntry[]
 }

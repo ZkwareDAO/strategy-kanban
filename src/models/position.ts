@@ -45,7 +45,7 @@ export interface Position {
 }
 
 /**
- * 代币持仓汇总
+ * 标的持仓汇总
  * @example
  * const summary: PositionSummary = {
  *   symbol: 'BTCUSDT',

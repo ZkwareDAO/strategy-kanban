@@ -35,8 +35,8 @@
               <b class="info-value">{{ strategy }}</b>
             </div>
             <div class="info-item">
-              <span class="info-label">代币</span>
-              <b class="info-value">{{ stripUsdt(symbol) }}</b>
+              <span class="info-label">标的</span>
+              <b class="info-value">{{ formatSymbol(symbol) }}</b>
             </div>
             <div class="info-item">
               <span class="info-label">初始资金</span>
@@ -164,6 +164,7 @@ import { ref, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Plotly, { type Data, type Layout, type Config } from 'plotly.js-dist-min'
 import { getBacktestResult, getBacktestEquity, getDailyKlineClose } from '@/api/backtest'
+import { formatSymbol } from '@/utils/display'
 import type { BacktestResult } from '@/models/backtest'
 import type { EquityPoint, DailyClosePoint } from '@/api/backtest'
 
@@ -379,10 +380,6 @@ function fmtDuration(v: number | undefined | null): string {
   const min = Math.round(v / 60)
   if (min < 60) return `${min} 分钟`
   return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟`
-}
-
-function stripUsdt(s: string): string {
-  return s.endsWith('USDT') ? s.slice(0, -4) : s
 }
 
 function goBack() {

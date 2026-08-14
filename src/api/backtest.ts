@@ -14,7 +14,7 @@ export interface DailyClosePoint {
 }
 
 /**
- * 获取回测索引：每个 (策略, 代币) 的最新完整回测定位。
+ * 获取回测索引：每个 (策略, 标的) 的最新完整回测定位。
  *
  * 索引由 vite 插件生成到 /backtest-output-index.json：
  * dev 期间监听回测目录变化后重新生成，并通过 HMR 通道推送

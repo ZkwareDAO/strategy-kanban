@@ -73,18 +73,18 @@
         </thead>
         <tbody>
           <tr v-for="s in strategyList" :key="s.strategy_name">
-            <td class="col-name">{{ s.strategy_name }}</td>
+            <td class="col-name" :title="s.strategy_name">{{ formatStrategyName(s.strategy_name) }}</td>
             <td :class="pnlClass(s.total_pnl)">{{ fmtPnl(s.total_pnl) }}</td>
             <td :class="winRateClass(s.win_rate)">{{ fmtPct(s.win_rate) }}</td>
             <td>{{ s.max_leverage }}x</td>
             <td class="col-modes">
               <span v-if="s.modes.length === 0" class="muted">-</span>
               <span
-                v-for="m in s.modes"
+                v-for="(m, index) in s.modes"
                 :key="m"
-                class="mode-tag"
-                :class="`mode-${m}`"
-              >{{ formatMode(m) }}</span>
+                class="mode-text"
+              >{{ formatMode(m)
+              }}<span v-if="index < s.modes.length - 1" class="sep">|</span></span>
             </td>
             <td>
               <button class="more-btn" @click="goDetail(s.strategy_name)">更多</button>
@@ -102,14 +102,15 @@ import { useRouter } from 'vue-router'
 import { getOrderPositions } from '@/api/performance'
 import { getRuntimesForDateRange } from '@/api/strategy'
 import { buildModeIndex, filterPositionsByModes, resolveModes, dedupePositions, extractStrategyGroup, type SelectableMode, type ModeIndex } from '@/utils/modeFilter'
+import { formatStrategyName } from '@/utils/display'
 import type { OrderPosition, StrategyPerformance } from '@/models/performance'
 import type { TradingMode } from '@/models/runtime'
 
 const router = useRouter()
 
 const MODE_OPTIONS: { value: SelectableMode; label: string }[] = [
-  { value: 'live', label: '生产' },
-  { value: 'smoking', label: '冒烟' },
+  { value: 'live', label: 'Product' },
+  { value: 'smoking', label: 'Smoking' },
 ]
 
 const loading = ref(false)
@@ -316,8 +317,8 @@ function goDetail(strategyName: string) {
 }
 
 function formatMode(mode: string): string {
-  if (mode === 'live') return '生产'
-  if (mode === 'smoking') return '冒烟'
+  if (mode === 'live') return 'Product'
+  if (mode === 'smoking') return 'Smoking'
   return mode
 }
 
@@ -405,15 +406,9 @@ onMounted(fetchData)
     color: #6b7280;
   }
 
-  &.active.live {
-    background: #dc2626;
-    border-color: #dc2626;
-    color: #fff;
-  }
-
-  &.active.smoking {
-    background: #4f46e5;
-    border-color: #4f46e5;
+  &.active {
+    background: #4b5563;
+    border-color: #4b5563;
     color: #fff;
   }
 
@@ -524,7 +519,6 @@ onMounted(fetchData)
 
   .col-modes {
     display: flex;
-    gap: 6px;
     justify-content: center;
     flex-wrap: wrap;
   }
@@ -549,22 +543,16 @@ onMounted(fetchData)
   }
 }
 
-.mode-tag {
+.mode-text {
   display: inline-block;
-  padding: 3px 10px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 600;
-}
+  font-weight: 500;
+  color: #374151;
 
-.mode-live {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.mode-smoking {
-  background: #e0e7ff;
-  color: #4f46e5;
+  .sep {
+    color: #d1d5db;
+    margin: 0 4px;
+    font-weight: 400;
+  }
 }
 
 .val-positive {

@@ -279,7 +279,7 @@ describe('groupRuns', () => {
     const rows = groupRuns(entries)
     const total = rows.reduce((n, r) => n + r.token_entries.length, 0)
     expect(total).toBe(runs.length)
-    // 每行内代币不重复
+    // 每行内标的不重复
     for (const r of rows) {
       expect(new Set(r.symbols).size).toBe(r.symbols.length)
     }

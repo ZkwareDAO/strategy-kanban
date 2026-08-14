@@ -4,7 +4,7 @@
 
     <div class="page-header">
       <h2>{{ strategy }} <span class="interval">{{ startDate }} ~ {{ endDate }}</span></h2>
-      <p>共 {{ tokenRows.length }} 个代币</p>
+      <p>共 {{ tokenRows.length }} 个标的</p>
     </div>
 
     <div v-if="loading" class="state">加载中...</div>
@@ -16,7 +16,7 @@
         <thead>
           <tr>
             <th @click="toggleSort('symbol')">
-              代币 <span class="sort-arrow">{{ sortArrow('symbol') }}</span>
+              标的 <span class="sort-arrow">{{ sortArrow('symbol') }}</span>
             </th>
             <th @click="toggleSort('annualized_return')">
               年化 <span class="sort-arrow">{{ sortArrow('annualized_return') }}</span>
@@ -44,7 +44,7 @@
         </thead>
         <tbody>
           <tr v-for="row in sortedRows" :key="row.symbol">
-            <td class="col-name">{{ stripUsdt(row.symbol) }}</td>
+            <td class="col-name">{{ formatSymbol(row.symbol) }}</td>
             <td :class="pctClass(row.annualized_return)">{{ fmtPct(row.annualized_return) }}</td>
             <td :class="pctClass(row.roe)">{{ fmtPct(row.roe) }}</td>
             <td :class="pctClass(row.total_return)">{{ fmtPct(row.total_return) }}</td>
@@ -67,6 +67,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getBacktestIndex } from '@/api/backtest'
 import { pickLatestPerSymbol } from '@/utils/backtestIndex'
+import { formatSymbol } from '@/utils/display'
 import type { BacktestOutputEntry } from '@/models/backtest'
 
 const route = useRoute()
@@ -124,7 +125,7 @@ async function fetchData() {
       return e.signals_processed !== 0
     })
     // 有 date/sweep 时精确定位到某一次历史回测；
-    // 缺省（旧链接）时退化为按区间匹配，并对每个代币只保留最新一次，避免重复成行
+    // 缺省（旧链接）时退化为按区间匹配，并对每个标的只保留最新一次，避免重复成行
     const hasRunParams = Boolean(runDate || runSweep)
     const matched = hasRunParams
       ? inInterval.filter(e => {
@@ -180,10 +181,6 @@ function toggleSort(key: SortKey) {
 function sortArrow(key: SortKey): string {
   if (sortKey.value !== key) return ''
   return sortAsc.value ? '▲' : '▼'
-}
-
-function stripUsdt(symbol: string): string {
-  return symbol.endsWith('USDT') ? symbol.slice(0, -4) : symbol
 }
 
 function fmtPct(v: number | null): string {

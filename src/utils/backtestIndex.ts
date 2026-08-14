@@ -26,10 +26,10 @@ export interface RawRun {
 /**
  * 从原始 run 列表构建索引：保留**全部**历史 run。
  *
- * 同一 (策略, 代币) 的多次回测各占一条，不做去重。
+ * 同一 (策略, 标的) 的多次回测各占一条，不做去重。
  * 无 result.json 的 run 不参与--未完成的回测不展示。
  *
- * 每条附带 `sweep`（同日轮次），用于把"同一天内对同一代币的重跑"
+ * 每条附带 `sweep`（同日轮次），用于把"同一天内对同一标的的重跑"
  * 拆分成不同的列表行，详见 assignSweeps。
  *
  * @param runs 扫描到的全部 run
@@ -43,12 +43,12 @@ export function buildIndex(runs: RawRun[]): BacktestOutputEntry[] {
 /**
  * 按 (策略, 运行日期) 分组，为组内每个 run 分配同日轮次 sweep。
  *
- * 脚本逐代币启动回测，同一批次的 HHMMSS 相差仅几秒，因此不能按 HHMMSS 分行
- * （会把一批 10 个代币炸成 10 行）。改为贪心分配：按 time 升序，每个 run 归入
- * 第一个"尚无该代币"的轮次，否则新开一个轮次。
+ * 脚本逐标的启动回测，同一批次的 HHMMSS 相差仅几秒，因此不能按 HHMMSS 分行
+ * （会把一批 10 个标的炸成 10 行）。改为贪心分配：按 time 升序，每个 run 归入
+ * 第一个"尚无该标的"的轮次，否则新开一个轮次。
  *
  * 效果：一天只跑一轮 → 全部 sweep 0，聚合成一行；
- * 同一代币当天重跑 → 落到 sweep 1，拆成独立的一行。
+ * 同一标的当天重跑 → 落到 sweep 1，拆成独立的一行。
  */
 function assignSweeps(runs: RawRun[]): BacktestOutputEntry[] {
   const byStrategyDate = new Map<string, RawRun[]>()
@@ -144,14 +144,14 @@ function completedKey(entry: { completed_at?: string; date: string; time: string
 }
 
 /**
- * 每个代币只保留最新的一次回测。
+ * 每个标的只保留最新的一次回测。
  *
  * 用于兼容缺少 date/sweep 参数的旧链接：此时无法定位到具体某一次历史回测，
- * 退化为按区间匹配，但必须去重--否则同一代币会因多次历史回测而重复成行
- * （代币列表以 symbol 作为渲染 key，重复会导致渲染异常）。
+ * 退化为按区间匹配，但必须去重--否则同一标的会因多次历史回测而重复成行
+ * （标的列表以 symbol 作为渲染 key，重复会导致渲染异常）。
  *
  * @param entries 同一策略/区间下的索引条目
- * @returns 每个代币一条，取完成时间最新者
+ * @returns 每个标的一条，取完成时间最新者
  */
 export function pickLatestPerSymbol(entries: BacktestOutputEntry[]): BacktestOutputEntry[] {
   const latest = new Map<string, BacktestOutputEntry>()

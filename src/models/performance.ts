@@ -43,7 +43,7 @@ export interface StrategyPerformance {
   floating_pnl?: number
 }
 
-/** 策略+代币维度汇总 */
+/** 策略+标的维度汇总 */
 export interface SymbolPerformance {
   symbol: string        // asset 字段
   total_trades: number

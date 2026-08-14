@@ -2,7 +2,7 @@
   <div class="position-table">
     <!-- Header -->
     <div class="position-header">
-      <div v-if="showSymbol">代币</div>
+      <div v-if="showSymbol">标的</div>
       <div>开仓点</div>
       <div>平仓点</div>
       <div>ROI</div>

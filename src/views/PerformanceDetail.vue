@@ -18,7 +18,7 @@
       <table class="perf-table">
         <thead>
           <tr>
-            <th>代币</th>
+            <th>标的</th>
             <th>总交易数</th>
             <th>盈利交易</th>
             <th>亏损交易</th>
@@ -83,9 +83,9 @@ function parseModes(raw: unknown): Set<SelectableMode> {
 const selectedModes = parseModes(route.query.modes)
 const modeLabel = selectedModes.size === 2
   ? '全部'
-  : Array.from(selectedModes).map(m => m === 'live' ? '生产' : '冒烟').join('/')
-// chip 配色：全选用中性灰，否则用第一个选中模式的配色
-const modeChipClass = selectedModes.size === 2 ? 'all' : Array.from(selectedModes)[0]
+  : Array.from(selectedModes).map(m => m === 'live' ? 'Product' : 'Smoking').join('|')
+// chip 统一中性灰，不再用模式配色
+const modeChipClass = 'all'
 // 蜡烛图周期透传（默认 1h）
 const tf = (route.query.tf as string) || '1h'
 
@@ -164,7 +164,7 @@ async function fetchData() {
     // 1. 匹配策略组：strategy_name 以策略组名开头
     //    （如 DOLPHINV2_4H_2_DOGEUSDT 匹配 DOLPHINV2_4H_2）
     // 2. 跨日快照去重（同一笔未平仓位在每日 CSV 中重复出现）
-    // 3. 再按所选模式（生产/冒烟）过滤
+    // 3. 再按所选模式（Product/Smoking）过滤
     const inStrategy = allPositions.filter(p => {
       if (p.strategy_name === props.strategyName) return true
       return p.strategy_name.startsWith(props.strategyName + '_')
@@ -300,16 +300,6 @@ onMounted(fetchData)
   &.all {
     background: #f3f4f6;
     color: #6b7280;
-  }
-
-  &.live {
-    background: #fee2e2;
-    color: #dc2626;
-  }
-
-  &.smoking {
-    background: #e0e7ff;
-    color: #4f46e5;
   }
 }
 

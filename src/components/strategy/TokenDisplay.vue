@@ -4,12 +4,12 @@
       <span
         v-for="(item, index) in visibleTokens"
         :key="index"
-        class="token-tag"
-        :class="[`mode-${item.mode}`, { 'no-data': !item.hasData, clickable: item.hasData }]"
+        class="token-chip"
+        :class="{ 'no-data': !item.hasData, clickable: item.hasData }"
+        :title="item.token"
         @click="$emit('click', item.token)"
-      >
-        {{ item.token }}
-      </span>
+      >{{ formatSymbol(item.token)
+      }}<span v-if="index < visibleTokens.length - 1" class="sep">|</span></span>
       <span v-if="hasMoreTokens" class="more-tokens">
         <el-popover
           placement="bottom"
@@ -23,12 +23,12 @@
             <span
               v-for="(item, index) in remainingTokens"
               :key="index"
-              class="token-tag"
-              :class="[`mode-${item.mode}`, { 'no-data': !item.hasData, clickable: item.hasData }]"
+              class="token-chip"
+              :class="{ 'no-data': !item.hasData, clickable: item.hasData }"
+              :title="item.token"
               @click="$emit('click', item.token)"
-            >
-              {{ item.token }}
-            </span>
+            >{{ formatSymbol(item.token)
+            }}<span v-if="index < remainingTokens.length - 1" class="sep">|</span></span>
           </div>
         </el-popover>
       </span>
@@ -38,6 +38,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatSymbol } from '@/utils/display'
 import type { TradingMode } from '@/models/runtime'
 
 const props = defineProps<{
@@ -76,57 +77,40 @@ const remainingCount = computed(() => {
 .token-list {
   display: flex;
   align-items: center;
-  gap: 6px;
   flex-wrap: wrap;
 }
 
-.token-tag {
+// 与「策略发现」表格同款：纯文本 + | 分隔，不用彩色标签
+.token-chip {
   display: inline-block;
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+
+  .sep {
+    color: #d1d5db;
+    margin: 0 4px;
+    font-weight: 400;
+  }
+}
+
+// 无数据不可下钻：弱化而非配色区分，属功能性反馈
+.token-chip.no-data {
+  color: #9ca3af;
+  cursor: default;
+}
+
+.token-chip.clickable {
   cursor: pointer;
-  transition: all 0.2s;
-}
-
-.token-tag.no-data {
-  opacity: 0.5;
-}
-
-.mode-live {
-  background: #fee2e2;
-  color: #dc2626;
 
   &:hover {
-    background: #fecaca;
-    transform: translateY(-1px);
-  }
-}
-
-.mode-paper_trading {
-  background: #fef3c7;
-  color: #d97706;
-
-  &:hover {
-    background: #fde68a;
-    transform: translateY(-1px);
-  }
-}
-
-.mode-smoking {
-  background: #e0e7ff;
-  color: #4f46e5;
-
-  &:hover {
-    background: #c7d2fe;
-    transform: translateY(-1px);
+    color: #2563eb;
   }
 }
 
 .more-tokens {
   display: inline-flex;
+  margin-left: 8px;
 }
 
 .more-btn {
@@ -149,7 +133,7 @@ const remainingCount = computed(() => {
 .token-popover {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
   max-width: 200px;
+  line-height: 1.9;
 }
 </style>

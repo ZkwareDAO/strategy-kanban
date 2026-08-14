@@ -5,7 +5,7 @@
  * 模式信息来自每日 manifest.json 的 (dir_name, symbol) -> trading_mode。
  *
  * 本工具把跨多日 manifest 收集到的 Runtime[] 聚合成索引，供区间统计按
- * 生产(live)/冒烟(smoking) 过滤仓位使用。
+ * Product(live)/Smoking(smoking) 过滤仓位使用。
  *
  * ## 结算币漂移
  *
@@ -94,7 +94,7 @@ export function buildModeIndex(runtimes: Runtime[]): ModeIndex {
 
 /**
  * 从 strategy_name（格式 {dir_name}_{SYMBOL}，如 NEWOBV_4H_1_BTCUSDT）
- * 提取 dir_name。期权策略 SYNC_ 开头的整体作为组名（无代币后缀可拆）。
+ * 提取 dir_name。期权策略 SYNC_ 开头的整体作为组名（无标的后缀可拆）。
  */
 export function extractStrategyGroup(strategyName: string): string {
   if (strategyName.startsWith('SYNC_')) return strategyName

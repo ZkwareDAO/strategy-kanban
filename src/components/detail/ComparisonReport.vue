@@ -1,15 +1,15 @@
 <template>
   <div class="comparison-section">
-    <h3 class="section-title">实盘与回放信号对比</h3>
+    <h3 class="section-title">实盘与回放交易信号对比</h3>
 
     <!-- Summary Cards -->
     <div class="comparison-summary">
       <div class="comparison-metric">
-        <label>实盘信号数</label>
+        <label>实盘交易信号数</label>
         <div class="value">{{ comparison?.total_live ?? 0 }}</div>
       </div>
       <div class="comparison-metric">
-        <label>回放信号数</label>
+        <label>回放交易信号数</label>
         <div class="value">{{ comparison?.total_backtest ?? 0 }}</div>
       </div>
       <div class="comparison-metric">
@@ -28,31 +28,31 @@
         :class="['tab-btn', { active: activeTab === 'all' }]"
         @click="activeTab = 'all'"
       >
-        全部信号
+        全部交易信号
       </button>
       <button
         :class="['tab-btn', { active: activeTab === 'live' }]"
         @click="activeTab = 'live'"
       >
-        实盘信号
+        实盘交易信号
       </button>
       <button
         :class="['tab-btn', { active: activeTab === 'backtest' }]"
         @click="activeTab = 'backtest'"
       >
-        回放信号
+        回放交易信号
       </button>
       <button
         :class="['tab-btn', { active: activeTab === 'unique' }]"
         @click="activeTab = 'unique'"
       >
-        独有信号
+        不一致交易信号
       </button>
     </div>
 
     <!-- Signal Lists -->
     <div class="signal-content">
-      <!-- 全部信号 -->
+      <!-- 全部交易信号 -->
       <template v-if="activeTab === 'all'">
         <div v-if="comparison?.matched_signals?.length" class="signal-section">
           <h4>匹配信号 ({{ comparison.matched_signals.length }}):</h4>
@@ -80,7 +80,7 @@
         </div>
 
         <div v-if="comparison?.unmatched_live?.length" class="signal-section">
-          <h4>实盘独有信号 ({{ comparison.unmatched_live.length }}):</h4>
+          <h4>仅实盘交易信号 ({{ comparison.unmatched_live.length }}):</h4>
           <div class="signal-list">
             <div
               v-for="sig in comparison.unmatched_live"
@@ -96,7 +96,7 @@
         </div>
 
         <div v-if="comparison?.unmatched_backtest?.length" class="signal-section">
-          <h4>回放独有信号 ({{ comparison.unmatched_backtest.length }}):</h4>
+          <h4>仅回放交易信号 ({{ comparison.unmatched_backtest.length }}):</h4>
           <div class="signal-list">
             <div
               v-for="sig in comparison.unmatched_backtest"
@@ -112,10 +112,10 @@
         </div>
       </template>
 
-      <!-- 实盘信号 -->
+      <!-- 实盘交易信号 -->
       <template v-else-if="activeTab === 'live'">
         <div v-if="allLiveSignals.length" class="signal-section">
-          <h4>实盘信号 ({{ allLiveSignals.length }}):</h4>
+          <h4>实盘交易信号 ({{ allLiveSignals.length }}):</h4>
           <div class="signal-list">
             <div
               v-for="sig in allLiveSignals"
@@ -129,13 +129,13 @@
             </div>
           </div>
         </div>
-        <div v-else class="empty-state">无实盘信号</div>
+        <div v-else class="empty-state">无实盘交易信号</div>
       </template>
 
-      <!-- 回放信号 -->
+      <!-- 回放交易信号 -->
       <template v-else-if="activeTab === 'backtest'">
         <div v-if="allBacktestSignals.length" class="signal-section">
-          <h4>回放信号 ({{ allBacktestSignals.length }}):</h4>
+          <h4>回放交易信号 ({{ allBacktestSignals.length }}):</h4>
           <div class="signal-list">
             <div
               v-for="sig in allBacktestSignals"
@@ -149,13 +149,13 @@
             </div>
           </div>
         </div>
-        <div v-else class="empty-state">无回放信号</div>
+        <div v-else class="empty-state">无回放交易信号</div>
       </template>
 
-      <!-- 独有信号 -->
+      <!-- 不一致交易信号 -->
       <template v-else-if="activeTab === 'unique'">
         <div v-if="comparison?.unmatched_live?.length" class="signal-section">
-          <h4>实盘独有信号 ({{ comparison.unmatched_live.length }}):</h4>
+          <h4>仅实盘交易信号 ({{ comparison.unmatched_live.length }}):</h4>
           <div class="signal-list">
             <div
               v-for="sig in comparison.unmatched_live"
@@ -171,7 +171,7 @@
         </div>
 
         <div v-if="comparison?.unmatched_backtest?.length" class="signal-section">
-          <h4>回放独有信号 ({{ comparison.unmatched_backtest.length }}):</h4>
+          <h4>仅回放交易信号 ({{ comparison.unmatched_backtest.length }}):</h4>
           <div class="signal-list">
             <div
               v-for="sig in comparison.unmatched_backtest"
@@ -187,7 +187,7 @@
         </div>
 
         <div v-if="!comparison?.unmatched_live?.length && !comparison?.unmatched_backtest?.length" class="empty-state">
-          无独有信号
+          无不一致交易信号
         </div>
       </template>
     </div>
@@ -237,7 +237,7 @@ const accuracyPercent = computed(() => {
   return `${(props.comparison.accuracy_score * 100).toFixed(0)}%`
 })
 
-// 所有实盘信号（匹配 + 独有）
+// 所有实盘交易信号（匹配 + 仅一侧出现）
 const allLiveSignals = computed(() => {
   if (!props.comparison) return []
   const matched = (props.comparison.matched_signals || []).map(s => ({ ...s, match_type: 'matched' }))
@@ -245,7 +245,7 @@ const allLiveSignals = computed(() => {
   return [...matched, ...unmatched]
 })
 
-// 所有回放信号（匹配 + 独有）
+// 所有回放交易信号（匹配 + 仅一侧出现）
 const allBacktestSignals = computed(() => {
   if (!props.comparison) return []
   const matched = (props.comparison.matched_signals || []).map(s => ({ ...s, match_type: 'matched' }))

@@ -30,7 +30,7 @@
     <div class="strategy-header">
       <div class="col-name">策略名称</div>
       <div class="col-perf">表现</div>
-      <div class="col-tokens">代币</div>
+      <div class="col-tokens">标的</div>
       <div class="col-mode">模式</div>
     </div>
 
@@ -85,13 +85,11 @@
         </div>
         <div class="col-mode">
           <span
-            v-for="mode in getModesForStrategy(summary.strategy)"
+            v-for="(mode, index) in getModesForStrategy(summary.strategy)"
             :key="mode"
-            class="mode-tag"
-            :class="`mode-${mode}`"
-          >
-            {{ formatMode(mode) }}
-          </span>
+            class="mode-text"
+          >{{ formatMode(mode)
+          }}<span v-if="index < getModesForStrategy(summary.strategy).length - 1" class="sep">|</span></span>
         </div>
       </div>
     </div>
@@ -148,7 +146,7 @@ const isNextDisabled = computed(() => {
   return dt.getTime() > todayUtc
 })
 
-// 获取策略对应的所有代币及其交易模式（包括无仓位的）
+// 获取策略对应的所有标的及其交易模式（包括无仓位的）
 function getTokenInfoForStrategy(strategy: string): { token: string; mode: TradingMode; hasData: boolean }[] {
   const strategyRuntimes = props.runtimes.filter(r => r.strategy === strategy)
   const tokenMap = new Map<string, { mode: TradingMode; hasData: boolean }>()
@@ -387,36 +385,22 @@ function pnlClass(pnl: number): string {
 
 .col-mode {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
-.mode-tag {
+// 与标的列同款：纯文本 + | 分隔
+.mode-text {
   display: inline-block;
-  padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
-}
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
 
-.mode-live {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.mode-paper_trading {
-  background: #fef3c7;
-  color: #d97706;
-}
-
-.mode-smoking {
-  background: #e0e7ff;
-  color: #4f46e5;
-}
-
-.mode-unknown {
-  background: #f3f4f6;
-  color: #6b7280;
+  .sep {
+    color: #d1d5db;
+    margin: 0 4px;
+    font-weight: 400;
+  }
 }
 
 .empty-state {
