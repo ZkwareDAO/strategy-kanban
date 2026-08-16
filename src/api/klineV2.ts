@@ -10,7 +10,7 @@ import { KLINE_BASE_URL } from '@/config/klineSource'
 import type { RawKlinePoint } from '@/models/klineV2'
 import { probeRange, sliceCsvByDateRange, streamFilterByDateRange, type RangeFetcher } from '@/utils/klineRange'
 
-/** 构造 1m K线 CSV 的 URL（public/kline-data 符号链接到 cta-strategy-code/data/strategies） */
+/** 构造 1m K线 CSV 的 URL（数据根路径见 config/klineSource.ts） */
 function kline1mUrl(symbol: string): string {
   return `${KLINE_BASE_URL}/1m/${symbol}_1m.csv`
 }

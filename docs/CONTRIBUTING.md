@@ -8,7 +8,7 @@
 
 - **Node.js**（推荐通过 nvm 管理）
 - **npm**
-- 数据源项目 `cta-strategy-code` 已部署（前端通过符号链接读取其输出）
+- 一份符合 [DATA-SPEC.md](DATA-SPEC.md) 的数据（本项目只消费静态文件，数据如何产出不做限制）
 
 ### 初始化
 
@@ -17,13 +17,17 @@ git clone <repo-url> strategy-kanban
 cd strategy-kanban
 npm install
 
-# 建立数据符号链接（指向 cta-strategy-code 输出）
-ln -s /path/to/cta-strategy-code/signal_comparison_output public/data
-ln -s /path/to/cta-strategy-code/data/strategies public/kline-data          # V2 蜡烛图
-ln -s /path/to/cta-strategy-code/backtest_output public/backtest-output     # 回测详情
+# 建立数据目录（可以是真实目录，也可以是指向你的数据目录的符号链接）
+ln -s /path/to/your-data/frontend-data   public/frontend-data     # 策略、持仓、对比（必需）
+ln -s /path/to/your-data/kline           public/kline-data        # K线行情（必需）
+ln -s /path/to/your-data/backtest_output public/backtest-output   # 历史回测（可选，策略发现页）
 ```
 
-> 三个符号链接均为 `server.watch` ignored 目录（见 `vite.config.ts`），避免 inotify `ENOSPC`。
+> 这些目录均在 `vite.config.ts` 的 `server.watch.ignored` 中，并设置了
+> `followSymlinks: false`，避免 Vite 监听大体量数据耗尽 inotify（`ENOSPC`）。
+> 这只影响文件监听，不影响静态文件 serving。
+
+各目录的字段规范与最小可运行配置见 [DATA-SPEC.md](DATA-SPEC.md) 与 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 ## 可用命令
 
@@ -90,7 +94,7 @@ test('returns empty array when no markets match query', () => {
 | `/detail/:strategy/:symbol` | `TokenDetail`（V1） |
 | `/detail-v2/:strategy/:symbol` | `TokenDetailV2`（数据分离版） |
 
-详见 [README.md](../README.md) 与 [docs/RUNBOOK.md](RUNBOOK.md)。
+详见 [README.md](../README.md)、[DATA-SPEC.md](DATA-SPEC.md) 与 [RUNBOOK.md](RUNBOOK.md)。
 
 ## PR 检查清单
 

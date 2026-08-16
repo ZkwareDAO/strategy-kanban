@@ -1,6 +1,8 @@
 # Trading Review Frontend
 
-交易策略复盘前端。读取 `cta-strategy-code` 项目生成的静态数据（K线、仓位、回测、信号对比），提供策略概览与代币详情可视化。
+交易策略复盘前端。读取静态数据文件（K线、持仓、回测、信号对比），提供策略概览与标的详情可视化。
+
+无后端、无数据库：只要数据文件符合 [docs/DATA-SPEC.md](docs/DATA-SPEC.md) 的规范，放进 `public/` 对应目录即可运行。数据如何产出由使用方自行决定，本项目不做限制。
 
 ## 技术栈
 
@@ -14,30 +16,38 @@
 ## 架构概览
 
 ```
-cta-strategy-code (数据源)
-  └── signal_comparison_output/{date}/
-        ├── manifest.yaml              # 所有 runtime 定义
-        ├── pnl/kline/{runtime}/       # 仓位 + K线 CSV
-        │   └── positions_index.json   # 有仓位的 runtime 索引（脚本生成）
-        ├── backtest_results/          # 回测数据
-        │   └── index.json             # 回测索引（脚本生成）
-        └── comparisons/               # 信号对比 JSON
-            ▲
-            │ 符号链接 (public/data -> signal_comparison_output)
-            ▼
-strategy-kanban (本项目)
-  └── public/data/{date}/  ->  静态 fetch  ->  Vue 应用
+public/                              # 数据目录（真实目录或指向外部数据的符号链接）
+├── frontend-data/                   # 策略、持仓、对比、策略表现（必需）
+│   ├── strategies.json              # 策略元数据（可选，中文名/逻辑/默认指标）
+│   ├── {YYYYMMDD}/
+│   │   ├── manifest.json            # 当日策略清单
+│   │   └── {strategy}/{SYMBOL}/
+│   │       ├── positions.json       # 持仓开平仓点
+│   │       ├── backtest.json        # 回放交易
+│   │       └── comparison.json      # 实盘与回放信号对比
+│   └── trading_data/
+│       └── trading_positions_{YYYYMMDD}.csv
+├── kline-data/                      # K线行情（必需）
+│   └── {period}/{SYMBOL}_{period}.csv
+└── backtest-output/                 # 历史回测（可选，策略发现页需要）
+    └── {strategy}/{YYYYMMDD}/{HHMMSS}/{SYMBOL}/
 ```
 
-本项目无后端，所有数据通过 `fetch('/data/{date}/...')` 读取静态文件。
+```
+public/ 静态文件  ——fetch（无后端）——>  Vue 应用（Vite dev server / 任意静态服务器）
+```
+
+本项目无后端，所有数据通过 `fetch` 读取 `public/` 下的静态文件。数据源更新后无需重新构建，刷新即生效。
+
+完整字段规范见 [docs/DATA-SPEC.md](docs/DATA-SPEC.md)。
 
 ## 路由
 
 | 路径 | 页面 | 说明 |
 |------|------|------|
-| `/` | `StrategyOverview` | 策略概览（页面1）：「策略表格 / 回测详情」tab，展示所有策略、代币、仓位统计 |
-| `/detail/:strategy/:symbol` | `TokenDetail` | 代币详情（V1）：蜡烛图、ROI/价格趋势、技术指标、回放对比 |
-| `/detail-v2/:strategy/:symbol` | `TokenDetailV2` | 代币详情（V2 数据分离版）：K线与仓位解耦，纯K线模式可选叠加仓位/回测 |
+| `/` | `StrategyOverview` | 策略概览（页面1）：「策略表格 / 回测详情」tab，展示所有策略、标的、仓位统计 |
+| `/detail/:strategy/:symbol` | `TokenDetail` | 标的详情（V1）：蜡烛图、ROI/价格趋势、技术指标、回放对比 |
+| `/detail-v2/:strategy/:symbol` | `TokenDetailV2` | 标的详情（V2 数据分离版）：K线与仓位解耦，纯K线模式可选叠加仓位/回测 |
 
 ## 可用命令
 
@@ -59,33 +69,35 @@ strategy-kanban (本项目)
 # 1. 安装依赖
 npm install
 
-# 2. 建立数据符号链接（指向数据源）
-ln -s /path/to/cta-strategy-code/signal_comparison_output public/data
+# 2. 准备数据目录（可以是真实目录，也可以是符号链接）
+ln -s /path/to/your-data/frontend-data   public/frontend-data
+ln -s /path/to/your-data/kline           public/kline-data
+ln -s /path/to/your-data/backtest_output public/backtest-output   # 可选
 
 # 3. 启动开发服务器
 npm run dev
 ```
 
-## 生产部署（局域网）
+最小可运行配置：一份 `manifest.json` + 一份对应交易对的 K线 CSV，即可启动并查看蜡烛图。
 
-本项目通过符号链接直接读取数据源，无需额外同步：
+## 生产部署（局域网）
 
 ```bash
 cd /path/to/strategy-kanban
 npm install
 npm run build
 
-# 数据符号链接
-rm -rf public/data
-ln -s /path/to/cta-strategy-code/signal_comparison_output public/data
+# 数据目录（同上）
+ln -s /path/to/your-data/frontend-data public/frontend-data
+ln -s /path/to/your-data/kline         public/kline-data
 
 # 启动（开发模式即可用于局域网访问）
 npm run dev -- --host
 ```
 
-数据源每天由 `cta-strategy-code/scripts/daily_backtest_sync.sh` 自动生成，前端即时读取最新数据。
+数据目录更新后前端即时读取最新数据，无需重新构建。
 
-详见 [docs/RUNBOOK.md](docs/RUNBOOK.md)。
+详见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) 与 [docs/RUNBOOK.md](docs/RUNBOOK.md)。
 
 ## 数据源约定
 
@@ -110,9 +122,9 @@ Manifest 与实际数据目录的前缀可能不一致，前端在 `src/models/r
 
 ### 策略展示逻辑
 
-- 合并 `manifest.yaml`（所有策略）与 `positions_index.json`（有仓位的策略），展示**所有**策略
-- 有仓位数据的代币标签正常显示且可点击；无仓位的半透明淡化、不可点击
-- 颜色按交易模式区分：`live`=红、`paper_trading`=橙、`smoking`=蓝
+- 策略清单来自 `manifest.json`，**所有**策略均展示（含当日无持仓的）
+- 有持仓数据（存在 `positions.json`）的标的正常显示且可点击；无持仓的置灰、不可点击
+- 标的与模式均为纯文本、以 `|` 分隔（如 `BTC|ETH`、`Paper|Smoking`）；标的名省略结算币后缀，悬停可见完整交易对
 
 ## 测试
 

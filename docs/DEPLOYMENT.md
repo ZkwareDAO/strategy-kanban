@@ -49,7 +49,7 @@ ln -s /绝对路径/你的数据目录/frontend_data public/frontend-data
 ln -s /绝对路径/你的行情目录 public/kline-data
 
 # 可选：历史回测结果（"策略发现"页需要）
-# 目录结构：{策略}/{YYYYMMDD}/{HHMMSS}/{代币}/backtest_result.json
+# 目录结构：{策略}/{YYYYMMDD}/{HHMMSS}/{标的}/backtest_result.json
 ln -s /绝对路径/你的回测目录 public/backtest-output
 ```
 
@@ -84,7 +84,7 @@ npm run dev
 
 ```
   ➜  Local:   http://localhost:3000/
-  ➜  Network: http://192.168.1.100:3000/
+  ➜  Network: http://<机器IP>:3000/
 ```
 
 - **本机访问**：打开 `http://localhost:3000`
@@ -134,14 +134,14 @@ npm run preview -- --host
 |------|-----------|-----------|
 | 实盘表现（首页） | `frontend-data/{date}/manifest.json` | 显示"暂无策略数据" |
 | ├─ 表现列统计 | `frontend-data/trading_data/*.csv` | 表现列显示 `—` |
-| └─ 代币标签 | `frontend-data/{date}/{strategy}/{symbol}/positions.json` | 标签半透明但仍可点击 |
+| └─ 标的标签 | `frontend-data/{date}/{strategy}/{symbol}/positions.json` | 标签半透明但仍可点击 |
 | K线详情页 | `kline-data/{period}/{SYMBOL}_{period}.csv` | 提示"所选范围内无K线数据" |
 | ├─ 仓位叠加 | `positions.json` | 纯 K 线模式，无开平仓标记 |
 | ├─ 回放对比 | `backtest.json` | 显示"无回放数据" |
 | └─ 信号对比报告 | `comparison.json` | 不显示对比模块 |
 | 策略表现页 | `frontend-data/trading_data/*.csv` | 显示"暂无策略表现数据" |
 | 策略发现页（列表） | `backtest-output/**/backtest_result.json` | 显示"暂无回测数据" |
-| ├─ 代币列表 | 同上（按索引筛选，无额外文件） | 显示"该区间暂无回测数据" |
+| ├─ 标的列表 | 同上（按索引筛选，无额外文件） | 显示"该区间暂无回测数据" |
 | └─ 回测详情 | `backtest_result.json` | 指标显示 `-` |
 | &nbsp;&nbsp;&nbsp;&nbsp;└─ 权益曲线 | `backtest_equity.csv` | 显示"无权益曲线数据"，指标仍正常 |
 
@@ -149,22 +149,35 @@ npm run preview -- --host
 
 ---
 
-## 配置策略信息
+## 配置策略信息（可选）
 
-前端需要一份策略配置来展示中文名称、策略逻辑和默认技术指标。
+如需展示策略的中文名称、逻辑说明和默认技术指标，在数据目录下放一份
+`frontend-data/strategies.json`（全局一份，非每日）。
 
-编辑 `src/config/strategies.ts`：
+键为策略目录名，与 `manifest.json` 的 `source_strategy` 对应：
 
-1. **删除或替换** `STRATEGY_CONFIGS` 数组中的示例策略
-2. 按你的策略添加配置（字段说明见 [DATA-SPEC.md 的策略配置格式](./DATA-SPEC.md)）
-3. 如果策略目录名的缩写与 `source_strategy` 不一致，在同文件的 `STRATEGY_DIR_MAP` 中添加映射
+```json
+{
+  "my_strategy_v1": {
+    "display_name": "均线突破",
+    "indicators": ["EMA", "ATR"],
+    "logic": {
+      "entry": ["EMA 快线上穿慢线"],
+      "exit": ["ATR 止损"],
+      "risk": ["趋势过滤"]
+    }
+  }
+}
+```
 
-未配置的策略仍可正常显示，只是：
+完整字段说明见 [DATA-SPEC.md 的 strategies.json 章节](./DATA-SPEC.md)。
+
+该文件是**可选的**，未提供或某策略未配置时仍可正常使用，只是：
 - 策略名显示为原始标识（如 `dolphin_trading_v2`）
 - 默认加载 RSI / MACD / ATR 三个指标
 - 策略逻辑区显示"策略逻辑未配置，请查看策略代码"
 
-修改后 Vite 会热更新，无需重启。
+因为是静态文件，修改后刷新页面即生效，无需重启或重新构建。
 
 ---
 
@@ -229,7 +242,7 @@ echo 'fs.inotify.max_user_watches=524288' | sudo tee -a /etc/sysctl.conf
 ### 策略发现页显示"暂无回测数据"
 
 1. 检查软链接：`ls -la public/backtest-output`
-2. 确认目录层级是 `{策略}/{YYYYMMDD}/{HHMMSS}/{代币}/`（四层，缺一层扫不到）
+2. 确认目录层级是 `{策略}/{YYYYMMDD}/{HHMMSS}/{标的}/`（四层，缺一层扫不到）
 3. 确认叶子目录里有 `backtest_result.json` —— 只有它存在才算"回测完成"
 4. 若回测存在却不显示，检查 `signals_processed` 是否为 `0`（空回测按设计不展示）
 5. 查看索引是否生成：`cat public/backtest-output-index.json`，`entries` 应非空。索引在 `npm run dev` 启动时生成，新增回测后会自动刷新

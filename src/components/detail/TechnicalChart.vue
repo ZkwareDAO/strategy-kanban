@@ -12,8 +12,8 @@ import {
   type KlinePoint,
   type IndicatorResult,
   INDICATOR_COLORS,
-  STRATEGY_INDICATOR_CONFIG,
 } from '@/indicators'
+import { getStrategyMeta, strategyMeta } from '@/api/strategyMeta'
 import type { BacktestSignal } from '@/models/backtest'
 
 interface Props {
@@ -48,10 +48,10 @@ watch([() => props.klineData, () => props.strategy, () => props.indicators, () =
   renderChart()
 }, { deep: true })
 
-function getIndicatorParams(strategyName: string) {
-  const config = STRATEGY_INDICATOR_CONFIG[strategyName]
-  if (!config) return {}
-  return config.params
+/** 指标参数来自数据源提供的策略元数据；缺省时各指标使用自身默认参数 */
+function getIndicatorParams(strategyDir: string) {
+  void strategyMeta.value
+  return getStrategyMeta(strategyDir)?.indicator_params ?? {}
 }
 
 function renderChart() {

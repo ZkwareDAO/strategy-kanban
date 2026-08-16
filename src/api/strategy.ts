@@ -205,7 +205,8 @@ export async function getComparison(
 }
 
 // ────────────────────────────────────────────────────────────────────
-// K线（v1 详情页仍使用 pnl/kline CSV，来自 signal_comparison_output）
+// K线（v1 详情页遗留路径：仍从 public/data 下的 pnl/kline CSV 读取。
+// v2 已改为从 public/kline-data 独立读取，见 api/klineV2.ts）
 // ────────────────────────────────────────────────────────────────────
 
 /**

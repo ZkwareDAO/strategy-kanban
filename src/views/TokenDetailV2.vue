@@ -128,7 +128,7 @@ import TimeframeSelector from '@/components/detail/TimeframeSelector.vue'
 import PriceRoiChart from '@/components/detail/PriceRoiChart.vue'
 import ComparisonReport from '@/components/detail/ComparisonReport.vue'
 import type { SignalComparison, StrategyLogic as StrategyLogicType } from '@/models/detail'
-import { getStrategyConfigByDir, type StrategyConfig } from '@/config/strategies'
+import { getStrategyMeta, loadStrategyMeta, strategyMeta, type StrategyMeta } from '@/api/strategyMeta'
 
 const props = defineProps<{ strategy: string; symbol: string }>()
 const route = useRoute()
@@ -188,16 +188,20 @@ const highlightPositionId = ref('')
 const comparisonData = ref<SignalComparison | undefined>(undefined)
 const logicExpanded = ref(false)
 
-// 策略配置与逻辑（复用 v1 的策略配置查找）
-const strategyConfig = computed<StrategyConfig | null>(() => getStrategyConfigByDir(props.strategy))
-const strategyPrefix = computed(() => strategyConfig.value?.strategy_prefix ?? '')
+// 策略元数据与逻辑（由数据源提供，见 api/strategyMeta.ts）
+// 依赖 strategyMeta.value 使其在异步加载完成后自动重算。
+const strategyConfig = computed<StrategyMeta | null>(() => {
+  void strategyMeta.value
+  return getStrategyMeta(props.strategy)
+})
+const strategyPrefix = computed(() => props.strategy)
 const strategyLogic = computed<StrategyLogicType>(() => {
-  const config = strategyConfig.value
-  if (config) {
+  const logic = strategyConfig.value?.logic
+  if (logic) {
     return {
-      entry_conditions: { title: '入场条件', rules: config.logic.entry },
-      exit_conditions: { title: '出场条件', rules: config.logic.exit },
-      risk_management: { title: '风控规则', rules: config.logic.risk },
+      entry_conditions: { title: '入场条件', rules: logic.entry ?? [] },
+      exit_conditions: { title: '出场条件', rules: logic.exit ?? [] },
+      risk_management: { title: '风控规则', rules: logic.risk ?? [] },
     }
   }
   return {
@@ -268,9 +272,9 @@ watch(selectedTimeframe, (tf) => {
   displayCount.value = getDefaultDisplayCount(tf)
 }, { immediate: true })
 
-// 根据策略配置设置默认指标
+// 根据策略元数据设置默认指标
 watch(strategyConfig, (config) => {
-  if (config) {
+  if (config?.indicators?.length) {
     const implemented = config.indicators.filter(
       (i): i is IndicatorType => ['RSI', 'MACD', 'ATR', 'EMA', 'BOLL', 'KD', 'ADX', 'OBV', 'Donchian', 'Envelope', 'SMA'].includes(i)
     )
@@ -411,7 +415,11 @@ watch(entryDialogVisible, (visible) => {
   }
 })
 
-onMounted(fetchData)
+onMounted(() => {
+  // 策略元数据与业务数据并行加载，失败不影响页面（内部已兜底）
+  loadStrategyMeta()
+  fetchData()
+})
 </script>
 
 <style scoped lang="scss">

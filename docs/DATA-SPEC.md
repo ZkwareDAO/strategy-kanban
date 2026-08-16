@@ -13,6 +13,7 @@
 ```
 public/
 ├── frontend-data/                  # 策略与持仓数据根目录
+│   ├── strategies.json             # 策略元数据（全局一份，可选）
 │   ├── YYYYMMDD/                   # 按日期组织，如 20260809
 │   │   ├── manifest.json           # 当日策略清单
 │   │   └── {strategy_dir}/         # 策略目录名，如 DOLPHINV2_4H_2
@@ -42,7 +43,7 @@ public/
 |---------|------|------|
 | `public/frontend-data` | 是 | 策略、持仓、对比、策略表现数据，按本规范组织 |
 | `public/kline-data` | 是 | K线 CSV 文件，按周期分目录 |
-| `public/backtest-output` | 否 | 历史回测结果，用于策略发现页（三层：策略列表 → 代币列表 → 回测详情） |
+| `public/backtest-output` | 否 | 历史回测结果，用于策略发现页（三层：策略列表 → 标的列表 → 回测详情） |
 
 这些路径可以直接是真实目录，也可以是指向外部数据目录的符号链接。
 
@@ -233,14 +234,14 @@ public/
 
 ### 5. trading_positions_YYYYMMDD.csv
 
-策略表现页面的订单/仓位数据，每日一份 CSV。**仅需包含前端使用的 7 个字段**，其余订单系统元数据（user_id、order_id、leverage、margin 等）无需存储。
+策略表现页面的订单/仓位数据，每日一份 CSV。**仅需包含下表列出的 8 个字段**，其余订单系统元数据（user_id、order_id、margin 等）无需存储。
 
 前端按日期范围读取多日文件并在浏览器端聚合统计（按策略、按交易对计算胜率、盈亏等），无需后端 API。
 
 ```csv
-asset,strategy_name,pos_type,pnl_value,deleted,created_at,close_time
-BTCUSDT,NEWOBV_4H_1_BTCUSDT,2,1.092,0,2026-08-06T04:01:03+08:00,
-BTCUSDT,DOLPHINV2_4H_2_BTCUSDT,2,50.0,1,2026-08-06T16:45:00+08:00,2026-08-06T23:22:00+08:00
+asset,strategy_name,pos_type,pnl_value,deleted,created_at,close_time,leverage
+BTCUSDT,NEWOBV_4H_1_BTCUSDT,2,1.092,0,2026-08-06T04:01:03+08:00,,5
+BTCUSDT,DOLPHINV2_4H_2_BTCUSDT,2,50.0,1,2026-08-06T16:45:00+08:00,2026-08-06T23:22:00+08:00,10
 ```
 
 | 字段 | 类型 | 说明 |
@@ -252,6 +253,7 @@ BTCUSDT,DOLPHINV2_4H_2_BTCUSDT,2,50.0,1,2026-08-06T16:45:00+08:00,2026-08-06T23:
 | `deleted` | number | 是否已平仓：1=已平仓（前端仅统计已平仓订单），0=持仓中 |
 | `created_at` | string | 开仓时间（RFC 3339） |
 | `close_time` | string | 平仓时间（RFC 3339），持仓中为空 |
+| `leverage` | number | 杠杆倍数，用于区间统计页的「杠杆」列（取策略组内最大值）。缺失时按 `1` 处理 |
 
 **策略关联规则（关键）**：
 
@@ -421,13 +423,13 @@ backtest-output/{strategy}/{YYYYMMDD}/{HHMMSS}/{SYMBOL}/
 
 | 字段 | 类型 | 展示位置 | 说明 |
 |------|------|---------|------|
-| `annualized_return` | number | 三层均展示 | 年化收益率。列表页的「最佳年化」取组内各代币的最大值 |
-| `roe` | number | 代币层、详情页 | 净资产收益率 |
-| `total_return` | number | 代币层、详情页 | 总收益率 |
-| `max_drawdown` | number | 代币层、详情页 | 最大回撤 |
-| `win_rate` | number | 代币层、详情页 | 胜率 |
-| `total_trades` | number | 代币层、详情页 | 总交易数 |
-| `sharpe_ratio` | number | 代币层、详情页 | 夏普比率（原值，不转百分比） |
+| `annualized_return` | number | 三层均展示 | 年化收益率。列表页的「最佳年化」取组内各标的的最大值 |
+| `roe` | number | 标的层、详情页 | 净资产收益率 |
+| `total_return` | number | 标的层、详情页 | 总收益率 |
+| `max_drawdown` | number | 标的层、详情页 | 最大回撤 |
+| `win_rate` | number | 标的层、详情页 | 胜率 |
+| `total_trades` | number | 标的层、详情页 | 总交易数 |
+| `sharpe_ratio` | number | 标的层、详情页 | 夏普比率（原值，不转百分比） |
 | `sortino_ratio` | number | 详情页 | 索提诺比率 |
 | `profit_factor` | number | 详情页 | 盈亏比 |
 | `winning_trades` / `losing_trades` | number | 详情页 | 盈利 / 亏损交易数 |
@@ -466,12 +468,12 @@ date,equity,cash
 
 | 数据情况 | 列表页表现 |
 |---------|-----------|
-| 一天跑一批多个代币（各代币 `{HHMMSS}` 不同） | 合并为 **1 行**，代币聚合展示 |
-| 同一代币当天重跑一次 | 拆成 **2 行**，各有独立的完成时间与指标 |
+| 一天跑一批多个标的（各标的 `{HHMMSS}` 不同） | 合并为 **1 行**，标的聚合展示 |
+| 同一标的当天重跑一次 | 拆成 **2 行**，各有独立的完成时间与指标 |
 | 不同日期运行 | 各自成行 |
 | 相同日期但回测区间不同 | 各自成行 |
 
-这样逐个代币启动回测（`{HHMMSS}` 相差几秒）不会让列表碎片化，同时同一代币的重跑记录也不会被覆盖。
+这样逐个标的启动回测（`{HHMMSS}` 相差几秒）不会让列表碎片化，同时同一标的的重跑记录也不会被覆盖。
 
 列表默认按**完成时间倒序**（最新的回测在最前）。行数超过 20 时自动分页。
 
@@ -506,121 +508,61 @@ date,equity,cash
 
 ---
 
-## 策略配置格式
+## strategies.json（策略元数据）
 
-除数据文件外，前端还需要一份策略配置，用于展示策略的中文名称、逻辑说明和默认技术指标。配置位于前端源码 `src/config/strategies.ts`，部署前根据自有策略编辑。
+策略的中文名、简介、逻辑说明与默认技术指标由**数据源提供**，前端不内置——这些属于使用方的策略资产。
 
-### 配置接口
+位置：`public/frontend-data/strategies.json`（**全局一份，非每日**）。文件缺失时前端仍可正常工作，只是策略名显示为原始标识、指标用默认值。
 
-```typescript
-interface StrategyConfig {
-  /** 策略前缀，匹配 manifest.json 中的 strategy 目录名或 runtime_name 前缀 */
-  strategy_prefix: string
+### 格式
 
-  /** 中文显示名 */
-  display_name: string
+顶层是一个对象，**键为策略目录名**，与 `manifest.json` 中的 `source_strategy` 对应：
 
-  /** 策略简介 */
-  description: string
-
-  /** 使用的技术指标列表（须是前端已实现的指标） */
-  indicators: IndicatorType[]
-
-  /** 指标参数覆盖（可选） */
-  indicator_params?: Record<string, Record<string, unknown>>
-
-  /** 策略逻辑（中文描述，展示在详情页可展开的"策略逻辑"区域） */
-  logic: {
-    /** 开仓条件列表 */
-    entry: string[]
-    /** 平仓条件列表 */
-    exit: string[]
-    /** 风控规则列表 */
-    risk: string[]
+```json
+{
+  "my_strategy_v1": {
+    "display_name": "均线突破",
+    "description": "EMA 金叉入场 + ATR 止损",
+    "indicators": ["EMA", "ATR", "RSI"],
+    "indicator_params": {
+      "EMA": { "fast_period": 12, "slow_period": 26 },
+      "ATR": { "period": 14 }
+    },
+    "logic": {
+      "entry": ["EMA 快线上穿慢线", "成交量 > 均量"],
+      "exit": ["ATR 止损", "移动止盈"],
+      "risk": ["单日最大亏损限制", "趋势过滤"]
+    }
   }
 }
 ```
 
-### 完整示例
+### 字段
 
-```typescript
-{
-  strategy_prefix: 'DOLPHINV2',
-  REDACTED
-  REDACTED
-  indicators: ['ATR', 'EMA', 'MACD'],
-  indicator_params: {
-    ATR: { period: 14 },
-    REDACTED
-  },
-  logic: {
-    entry: [
-      REDACTED
-      REDACTED
-      REDACTED
-    ],
-    exit: [
-      REDACTED
-      REDACTED
-    ],
-    risk: [
-      REDACTED
-      REDACTED
-      REDACTED
-    ],
-  },
-}
-```
+| 字段 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `display_name` | string | 否 | 中文显示名。缺省时显示原始策略标识 |
+| `description` | string | 否 | 策略简介 |
+| `indicators` | string[] | 否 | 该策略关注的指标，决定详情页默认勾选项。缺省时默认勾选 `RSI`/`MACD`/`ATR` |
+| `indicator_params` | object | 否 | 指标参数覆盖，形如 `{ "EMA": { "fast_period": 100 } }`。缺省时各指标用自身默认参数 |
+| `logic.entry` | string[] | 否 | 入场条件，逐条展示 |
+| `logic.exit` | string[] | 否 | 出场条件 |
+| `logic.risk` | string[] | 否 | 风控规则 |
 
-### 支持的技术指标
+所有字段均为可选：只提供 `display_name` 也是合法配置。`logic` 三段缺失时，策略逻辑区显示「策略逻辑未配置，请查看策略代码」。
 
-`indicators` 字段只能使用以下前端已实现的指标：
+### 可用的指标名
 
-| 指标 | 说明 |
-|------|------|
-| `RSI` | 相对强弱指标 |
-| `MACD` | 指数平滑异同移动平均线 |
-| `ATR` | 平均真实波幅 |
-| `EMA` | 指数移动平均线 |
-| `BOLL` | 布林带 |
-| `KD` | 随机指标 |
-| `ADX` | 平均趋向指数 |
-| `OBV` | 能量潮 |
-| `Donchian` | 唐奇安通道 |
-| `Envelope` | 包络线 |
-| `SMA` | 简单移动平均线 |
+`indicators` 与 `indicator_params` 的键须是前端已实现的指标，否则被忽略：
 
-### 配置匹配规则
+`RSI`、`MACD`、`ATR`、`EMA`、`BOLL`、`KD`、`ADX`、`OBV`、`Donchian`、`Envelope`、`SMA`
 
-前端通过 `manifest.json` 中的 `source_strategy` 查找策略配置：
+### 键的匹配规则
 
-1. 先查 `STRATEGY_DIR_MAP`（source_strategy → strategy_prefix 的映射）
-2. 未命中时，将 source_strategy 去掉下划线并大写作为 prefix 匹配
+1. 先用 `source_strategy` 精确匹配键（推荐：直接用目录名作键）
+2. 未命中时，将 `source_strategy` 去下划线并大写后再匹配一次（如 `obv_atr_v2` → `OBVATRV2`），兼容以缩写为键的配置
 
-| source_strategy | 匹配到的 prefix | 说明 |
-|-----------------|----------------|------|
-| `dolphin_trading_v2` | `DOLPHINV2` | 去下划线大写即可 |
-| `new_dolphin` | `NEWDOLPHIN` | 同上 |
-| `ema_rsi_pullback` | `ERP` | 缩写名不同，需在 DIR_MAP 显式配置 |
-| `vwap_channel_momentum` | `VWAPMOM` | 同上 |
-
-对于缩写名与目录名不一致的策略，在 `STRATEGY_DIR_MAP` 中添加映射：
-
-```typescript
-const STRATEGY_DIR_MAP: Record<string, string> = {
-  ema_rsi_pullback: 'ERP',
-  regime_donchian_atr: 'RDATR',
-  vwap_channel_momentum: 'VWAPMOM',
-  sar_snt3_v3: 'SAR_SNT3_V3',
-}
-```
-
-未匹配到配置的策略：
-- 显示 source_strategy 作为名称
-- 默认加载 `RSI`、`MACD`、`ATR` 三个指标
-- 策略逻辑区域显示"策略逻辑未配置，请查看策略代码"
-
----
+推荐直接用目录名作键，无需额外映射表。
 
 ## 数据准备检查清单
 
@@ -634,6 +576,6 @@ const STRATEGY_DIR_MAP: Record<string, string> = {
 - [ ] `public/kline-data/{period}/{SYMBOL}_{period}.csv` — K线行情
 - [ ] `public/backtest-output/{strategy}/{YYYYMMDD}/{HHMMSS}/{SYMBOL}/backtest_result.json` — 回测结果（可选，需要"策略发现"页时准备）
 - [ ] `public/backtest-output/.../backtest_equity.csv` — 回测权益曲线（可选，详情页曲线需要）
-- [ ] `src/config/strategies.ts` 中添加了自有策略的配置
+- [ ] `public/frontend-data/strategies.json` — 策略元数据（可选，用于展示策略中文名与逻辑说明）
 
 **最低运行要求**：只要有 `manifest.json`、`positions.json`（可为空数组）和 K线 CSV，前端即可运行并展示 K 线图。其他数据文件按需提供，缺失时前端优雅降级。

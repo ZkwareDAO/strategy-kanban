@@ -37,7 +37,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { IndicatorType } from '@/indicators'
-import { getStrategyConfig } from '@/config/strategies'
+import { getStrategyMeta, strategyMeta } from '@/api/strategyMeta'
 
 interface Props {
   modelValue: IndicatorType[]
@@ -68,24 +68,25 @@ const ALL_INDICATORS: { type: IndicatorType; name: string; description: string }
   { type: 'SMA', name: 'SMA', description: '简单移动平均线' },
 ]
 
-/** 策略配置 */
+/** 策略元数据（由数据源提供；依赖 strategyMeta 以在加载完成后重算） */
 const strategyConfig = computed(() => {
   if (!props.strategy) return null
-  return getStrategyConfig(props.strategy)
+  void strategyMeta.value
+  return getStrategyMeta(props.strategy)
 })
 
 /** 策略默认指标集合 */
 const strategyDefaultSet = computed(() => {
-  if (!strategyConfig.value) return new Set<string>()
-  return new Set(strategyConfig.value.indicators)
+  return new Set(strategyConfig.value?.indicators ?? [])
 })
 
 /** 根据策略动态生成可用指标列表 */
 const availableIndicators = computed(() => {
-  if (!strategyConfig.value) {
+  const indicators = strategyConfig.value?.indicators
+  if (!indicators?.length) {
     return ALL_INDICATORS
   }
-  const strategyTypes = new Set(strategyConfig.value.indicators)
+  const strategyTypes = new Set(indicators)
   const strategyItems = ALL_INDICATORS.filter(i => strategyTypes.has(i.type))
   const otherItems = ALL_INDICATORS.filter(i => !strategyTypes.has(i.type))
   return [...strategyItems, ...otherItems]
