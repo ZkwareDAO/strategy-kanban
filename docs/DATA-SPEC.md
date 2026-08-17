@@ -579,3 +579,37 @@ date,equity,cash
 - [ ] `public/frontend-data/strategies.json` — 策略元数据（可选，用于展示策略中文名与逻辑说明）
 
 **最低运行要求**：只要有 `manifest.json`、`positions.json`（可为空数组）和 K线 CSV，前端即可运行并展示 K 线图。其他数据文件按需提供，缺失时前端优雅降级。
+
+---
+
+## 参考实现：示例数据生成器
+
+`scripts/sample-data/` 是本规范的一份**可执行参考实现**。运行 `npm run sample-data` 会按上述全部规范生成一整套虚拟数据，可直接对照阅读产出的文件来理解字段含义。
+
+```bash
+npm run sample-data              # 生成并链接到 public/
+npm run sample-data -- --no-link # 只写入 sample-data/，便于单独查看文件
+```
+
+生成的数据全部为程序合成（随机游走行情 + 虚构的 `DEMO*` 策略），不含任何真实行情或策略资产。
+
+各模块与本文档章节的对应关系：
+
+| 脚本 | 对应章节 |
+|------|---------|
+| `market.mjs` | 6. K线 CSV |
+| `strategies.mjs` | 1. manifest.json、strategies.json |
+| `trades.mjs` | 2. positions.json、3. backtest.json、4. comparison.json、5. 表现 CSV |
+| `backtest.mjs` | 7. 回测数据（backtest-output） |
+
+生成器只产出 `1m` 与 `1d` 两种周期——这是前端唯一直接读取的两种（`api/klineV2.ts` 读 1m，`api/backtest.ts` 读 1d），其余周期由前端重采样得出。接入自有数据时同理，无需准备全部周期。
+
+`scripts/sample-data/sample-data.test.mjs` 把本规范中的硬性约束写成了断言，可作为校验自有数据的检查清单参考：
+
+- K线时间戳零填充且严格升序（Range 二分依赖字典序等于时间序）
+- `high >= max(open, close)`、`low <= min(open, close)`
+- 仓位时间戳落在整分钟（前端按 `HH:MM` 与 1m K线匹配）
+- `realized_pnl` 与持仓方向、价差一致
+- 跨日仓位在平仓日 `entry_time` 为 `null` 而 `entry_price` 保留
+- 表现 CSV 中同一笔仓位跨天出现时 `created_at` 保持一致（否则前端去重失败，交易数虚增）
+

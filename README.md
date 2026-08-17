@@ -57,11 +57,45 @@ public/ 静态文件  ——fetch（无后端）——>  Vue 应用（Vite dev s
 | `npm run dev` | 启动开发服务器（默认端口 3000） |
 | `npm run build` | 类型检查 + 生产构建（产物在 `dist/`） |
 | `npm run preview` | 预览生产构建 |
+| `npm run sample-data` | 生成示例数据（虚拟数据，用于快速体验） |
 | `npm test` | 运行单元测试（watch 模式） |
 | `npm run test:run` | 运行单元测试（单次） |
 | `npm run test:coverage` | 运行单元测试并生成覆盖率报告 |
 | `npm run type-check` | TypeScript 类型检查（不产出文件） |
 <!-- /AUTO-GENERATED:scripts -->
+
+## 快速体验（示例数据）
+
+没有现成数据也能先看效果。以下命令会生成一整套**虚拟数据**并自动链接到 `public/`：
+
+```bash
+npm install
+npm run sample-data
+npm run dev
+```
+
+打开 http://localhost:3000 即可看到策略概览、区间统计、标的详情与历史回测各页面。
+
+示例数据的特点：
+
+- **全部由程序合成**：价格是随机游走，策略是虚构的 `DEMO*`，不含任何真实行情或策略资产
+- **日期跟随运行当天**：前端各页面的默认日期相对「今天」计算（概览默认昨天、区间统计默认上周一至今天），因此脚本每次以运行当天倒推 21 天，产出的数据永远落在默认窗口内
+- **可复现**：固定随机种子，同一天重复运行产出完全相同的数据
+- **不会覆盖你的数据**：若 `public/frontend-data` 等已存在（真实目录或指向别处的软链），脚本只提示、不改动
+
+常用参数：
+
+```bash
+npm run sample-data -- --days 30    # 自定义生成天数
+npm run sample-data -- --no-link    # 只写入 sample-data/，不建立 public/ 软链
+npm run sample-data -- --help       # 查看全部参数
+```
+
+产物位于 `sample-data/`（已在 `.gitignore` 中），删除该目录与 `public/` 下对应软链即可完全清除。
+
+> 示例数据仅覆盖有路由入口的页面。V1 详情页（`/detail/:strategy/:symbol`）依赖旧的
+> `public/data` 路径，不在生成范围内。
+
 
 ## 本地开发
 

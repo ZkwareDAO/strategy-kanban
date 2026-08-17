@@ -30,6 +30,10 @@ public/backtest-output
 public/backtest-output-index.json
 public/frontend-data
 
+# Generated sample data (npm run sample-data)
+# 前导 / 锚定仓库根目录，否则会连带忽略 scripts/sample-data/ 源码
+/sample-data
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

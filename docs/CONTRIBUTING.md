@@ -8,7 +8,8 @@
 
 - **Node.js**（推荐通过 nvm 管理）
 - **npm**
-- 一份符合 [DATA-SPEC.md](DATA-SPEC.md) 的数据（本项目只消费静态文件，数据如何产出不做限制）
+- 一份符合 [DATA-SPEC.md](DATA-SPEC.md) 的数据（本项目只消费静态文件，数据如何产出不做限制）。
+  手上没有数据时可用 `npm run sample-data` 生成虚拟数据，见下方「用示例数据快速起步」
 
 ### 初始化
 
@@ -29,6 +30,19 @@ ln -s /path/to/your-data/backtest_output public/backtest-output   # 历史回测
 
 各目录的字段规范与最小可运行配置见 [DATA-SPEC.md](DATA-SPEC.md) 与 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
+### 用示例数据快速起步
+
+没有真实数据（或只是想改 UI）时，用生成器铺一套虚拟数据即可跑通全部页面：
+
+```bash
+npm run sample-data
+npm run dev
+```
+
+数据全部由程序合成，日期跟随运行当天，因此永远落在各页面的默认日期窗口内。
+若 `public/` 下已有指向真实数据的符号链接，脚本会跳过不覆盖。
+生成器本身的说明见 [DATA-SPEC.md 的「参考实现」一节](DATA-SPEC.md)。
+
 ## 可用命令
 
 <!-- AUTO-GENERATED:scripts -->
@@ -37,6 +51,7 @@ ln -s /path/to/your-data/backtest_output public/backtest-output   # 历史回测
 | `npm run dev` | 启动开发服务器（默认端口 3000，局域网用 `-- --host`） |
 | `npm run build` | `vue-tsc -b` 类型检查 + `vite build` 生产构建（产物在 `dist/`） |
 | `npm run preview` | 预览生产构建 |
+| `npm run sample-data` | 生成示例数据（虚拟数据，用于无真实数据时起步） |
 | `npm test` | 运行单元测试（watch 模式） |
 | `npm run test:run` | 运行单元测试（单次） |
 | `npm run test:coverage` | 运行单元测试并生成覆盖率报告 |
@@ -49,6 +64,7 @@ ln -s /path/to/your-data/backtest_output public/backtest-output   # 历史回测
 - 测试文件与源码**同目录**，命名 `*.test.ts`
 - 运行：`npm run test:run`（单次）/ `npm run test:coverage`（覆盖率）
 - 覆盖率目标：≥ 80%
+- 示例数据生成器的测试为 `scripts/sample-data/sample-data.test.mjs`（`.mjs`，与脚本同目录）
 
 ### 测试结构（AAA 模式）
 
