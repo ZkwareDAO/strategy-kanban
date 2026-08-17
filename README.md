@@ -49,6 +49,34 @@ public/ 静态文件  ——fetch（无后端）——>  Vue 应用（Vite dev s
 | `/detail/:strategy/:symbol` | `TokenDetail` | 标的详情（V1）：蜡烛图、ROI/价格趋势、技术指标、回放对比 |
 | `/detail-v2/:strategy/:symbol` | `TokenDetailV2` | 标的详情（V2 数据分离版）：K线与仓位解耦，纯K线模式可选叠加仓位/回测 |
 
+## 界面预览
+
+以下截图均基于 `npm run sample-data` 生成的示例数据，展示的策略与持仓为程序合成，非真实交易数据。
+
+### 每日收益
+
+按日查看各策略的标的、运行模式与仓位统计。
+
+<img src="docs/images/每日收益示例.png" width="900" alt="每日收益">
+
+### 区间统计
+
+跨日期区间聚合策略表现，统计胜率、盈亏与杠杆。
+
+<img src="docs/images/区间统计示例.png" width="900" alt="区间统计">
+
+### 策略发现
+
+历史回测记录列表，按完成时间倒序，同批次运行的多个标的自动合并为一行。
+
+<img src="docs/images/策略发现示例.png" width="900" alt="策略发现">
+
+### 回测详情
+
+单次回测的完整指标与权益曲线，可与同期日线走势叠加对比。
+
+<img src="docs/images/策略发现详情.png" width="900" alt="回测详情">
+
 ## 可用命令
 
 <!-- AUTO-GENERATED:scripts -->

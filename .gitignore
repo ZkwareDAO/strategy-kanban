@@ -55,6 +55,8 @@ Thumbs.db
 # Misc
 异常图片.png
 *.png
+# 文档用的界面截图（基于示例数据，不含真实策略与持仓）
+!docs/images/*.png
 -o
 skills-lock.json
 .agents/
