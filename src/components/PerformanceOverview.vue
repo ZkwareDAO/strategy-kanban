@@ -65,6 +65,8 @@
           <tr>
             <th>策略名称</th>
             <th>PNL</th>
+            <th>盈利单合计</th>
+            <th>亏损单合计</th>
             <th>胜率</th>
             <th>杠杆</th>
             <th>模式</th>
@@ -75,6 +77,8 @@
           <tr v-for="s in strategyList" :key="s.strategy_name">
             <td class="col-name" :title="s.strategy_name">{{ formatStrategyName(s.strategy_name) }}</td>
             <td :class="pnlClass(s.total_pnl)">{{ fmtPnl(s.total_pnl) }}</td>
+            <td class="val-positive">{{ fmtPnl(s.profit_sum ?? 0) }}</td>
+            <td class="val-negative">{{ fmtPnl(s.loss_sum ?? 0) }}</td>
             <td :class="winRateClass(s.win_rate)">{{ fmtPct(s.win_rate) }}</td>
             <td>{{ s.max_leverage }}x</td>
             <td class="col-modes">
@@ -99,14 +103,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAppStore } from '@/stores/app'
 import { getOrderPositions } from '@/api/performance'
 import { getRuntimesForDateRange } from '@/api/strategy'
 import { buildModeIndex, filterPositionsByModes, resolveModes, dedupePositions, extractStrategyGroup, type SelectableMode, type ModeIndex } from '@/utils/modeFilter'
 import { formatStrategyName } from '@/utils/display'
+import { accumulatePnlSplit, initPnlSplit, type PnlSplitBucket } from '@/utils/perfAggregate'
 import type { OrderPosition, StrategyPerformance } from '@/models/performance'
 import type { TradingMode } from '@/models/runtime'
 
 const router = useRouter()
+const appStore = useAppStore()
 
 const MODE_OPTIONS: { value: SelectableMode; label: string }[] = [
   { value: 'live', label: 'Product' },
@@ -149,10 +156,12 @@ const lastMonday = getLastMonday()
 const today = new Date()
 today.setHours(23, 59, 59, 0)
 
-const dateRange = ref<[string, string]>([
-  lastMonday.toISOString().slice(0, 10),
-  today.toISOString().slice(0, 10),
-])
+const dateRange = ref<[string, string]>(
+  appStore.performanceRange ?? [
+    lastMonday.toISOString().slice(0, 10),
+    today.toISOString().slice(0, 10),
+  ],
+)
 
 // 日期快捷预设（el-date-picker daterange shortcuts API）
 const dateShortcuts = computed(() => {
@@ -253,6 +262,7 @@ const strategyList = computed<StrategyRow[]>(() => {
       if (p.pnl_value > 0) existing.winning_trades += 1
       if (p.pnl_value < 0) existing.losing_trades += 1
       existing.total_pnl += p.pnl_value
+      accumulatePnlSplit(existing as PnlSplitBucket, p.pnl_value)
       if (p.leverage > existing.max_leverage) existing.max_leverage = p.leverage
     } else {
       map.set(group, {
@@ -262,6 +272,7 @@ const strategyList = computed<StrategyRow[]>(() => {
         losing_trades: p.pnl_value < 0 ? 1 : 0,
         win_rate: 0,
         total_pnl: p.pnl_value,
+        ...initPnlSplit(p.pnl_value),
         max_leverage: p.leverage,
         mode: 'live',
         modes: [],
@@ -299,6 +310,10 @@ async function fetchData() {
 }
 
 function handleDateChange() {
+  // 记住用户的选择，使切 tab 或进出详情页后返回时不被重置为默认区间
+  if (dateRange.value?.length === 2) {
+    appStore.setPerformanceRange(dateRange.value[0], dateRange.value[1])
+  }
   fetchData()
 }
 

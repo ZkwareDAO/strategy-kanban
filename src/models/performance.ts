@@ -29,6 +29,13 @@ export interface StrategyPerformance {
   losing_trades: number
   win_rate: number      // 0~1
   total_pnl: number
+  /**
+   * 盈利仓位的 PNL 之和（恒 >= 0）。与 loss_sum 相加等于 total_pnl。
+   * 可选：仅「区间统计」页填充，「每日收益」页不展示这两列。
+   */
+  profit_sum?: number
+  /** 亏损仓位的 PNL 之和（恒 <= 0）。见 profit_sum。 */
+  loss_sum?: number
   /** 该策略已平仓位中观察到的最大杠杆（风险视角） */
   max_leverage: number
   /** 该策略在所选模式下的模式标签（live/smoking/...） */
@@ -52,5 +59,9 @@ export interface SymbolPerformance {
   win_rate: number
   max_profit: number    // 最大单笔盈利
   max_loss: number      // 最大单笔亏损（负数）
+  /** 盈利仓位的 PNL 之和（恒 >= 0）。与 loss_sum 相加等于 total_pnl。 */
+  profit_sum: number
+  /** 亏损仓位的 PNL 之和（恒 <= 0）。见 profit_sum。 */
+  loss_sum: number
   total_pnl: number
 }

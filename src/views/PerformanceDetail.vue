@@ -25,6 +25,8 @@
             <th>胜率</th>
             <th>最大盈利</th>
             <th>最大亏损</th>
+            <th>盈利单合计</th>
+            <th>亏损单合计</th>
             <th>总盈亏</th>
             <th></th>
           </tr>
@@ -38,6 +40,8 @@
             <td :class="winRateClass(s.win_rate)">{{ fmtPct(s.win_rate) }}</td>
             <td class="val-positive">{{ fmtPnl(s.max_profit) }}</td>
             <td class="val-negative">{{ fmtPnl(s.max_loss) }}</td>
+            <td class="val-positive">{{ fmtPnl(s.profit_sum) }}</td>
+            <td class="val-negative">{{ fmtPnl(s.loss_sum) }}</td>
             <td :class="pnlClass(s.total_pnl)">{{ fmtPnl(s.total_pnl) }}</td>
             <td>
               <button class="more-btn" @click="goCandle(s.symbol)">更多</button>
@@ -55,6 +59,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getOrderPositions } from '@/api/performance'
 import { getRuntimesForDateRange } from '@/api/strategy'
 import { buildModeIndex, filterPositionsByModes, dedupePositions, findRuntimeForAsset, type SelectableMode, type ModeIndex } from '@/utils/modeFilter'
+import { accumulatePnlSplit, initPnlSplit } from '@/utils/perfAggregate'
 import type { OrderPosition, SymbolPerformance } from '@/models/performance'
 import type { Runtime } from '@/models/runtime'
 
@@ -122,6 +127,7 @@ const symbolList = computed<SymbolPerformance[]>(() => {
       if (p.pnl_value > 0) existing.winning_trades += 1
       if (p.pnl_value < 0) existing.losing_trades += 1
       existing.total_pnl += p.pnl_value
+      accumulatePnlSplit(existing, p.pnl_value)
       if (p.pnl_value > existing.max_profit) existing.max_profit = p.pnl_value
       if (p.pnl_value < existing.max_loss) existing.max_loss = p.pnl_value
     } else {
@@ -133,6 +139,7 @@ const symbolList = computed<SymbolPerformance[]>(() => {
         win_rate: 0,
         max_profit: p.pnl_value > 0 ? p.pnl_value : 0,
         max_loss: p.pnl_value < 0 ? p.pnl_value : 0,
+        ...initPnlSplit(p.pnl_value),
         total_pnl: p.pnl_value,
       })
     }
