@@ -56,7 +56,7 @@
 
     <div v-if="loading" class="state">加载中...</div>
     <div v-else-if="error" class="state error">{{ error }}</div>
-    <div v-else-if="strategyList.length === 0" class="state">暂无策略表现数据</div>
+    <div v-else-if="hasNoData" class="state">暂无策略表现数据</div>
 
     <!-- 策略表现表格 -->
     <div v-else class="table-wrapper">
@@ -94,6 +94,40 @@
               <button class="more-btn" @click="goDetail(s.strategy_name)">更多</button>
             </td>
           </tr>
+
+          <tr v-if="strategyList.length === 0" class="row-muted">
+            <td colspan="8">该区间内无已平仓交易</td>
+          </tr>
+
+          <!-- 持仓中分区：沉到底部，浮盈随行情变动，不计入上方已实现指标 -->
+          <template v-if="openStrategyList.length > 0">
+            <tr class="section-row">
+              <td colspan="8">
+                <span class="section-title">持仓中</span>
+                <span class="section-hint">尚未平仓，浮盈随行情变动，不计入上方已实现指标</span>
+              </td>
+            </tr>
+            <tr v-for="o in openStrategyList" :key="`open-${o.strategy_name}`" class="open-row">
+              <td class="col-name" :title="o.strategy_name">
+                {{ formatStrategyName(o.strategy_name) }}
+                <span class="open-badge">持仓 {{ o.open_trades }}</span>
+              </td>
+              <td :class="pnlClass(o.floating_pnl)">{{ fmtPnl(o.floating_pnl) }}</td>
+              <td colspan="4" class="col-floating-label">浮动盈亏（未实现）</td>
+              <td class="col-modes">
+                <span v-if="o.modes.length === 0" class="muted">-</span>
+                <span
+                  v-for="(m, index) in o.modes"
+                  :key="m"
+                  class="mode-text"
+                >{{ formatMode(m)
+                }}<span v-if="index < o.modes.length - 1" class="sep">|</span></span>
+              </td>
+              <td>
+                <button class="more-btn" @click="goDetail(o.strategy_name)">更多</button>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>
@@ -109,8 +143,8 @@ import { getRuntimesForDateRange } from '@/api/strategy'
 import { buildModeIndex, filterPositionsByModes, resolveModes, dedupePositions, extractStrategyGroup, type SelectableMode, type ModeIndex } from '@/utils/modeFilter'
 import { formatStrategyName } from '@/utils/display'
 import { accumulatePnlSplit, initPnlSplit, type PnlSplitBucket } from '@/utils/perfAggregate'
+import { splitRealizedAndOpen, isFuturesPosition } from '@/utils/positionSplit'
 import type { OrderPosition, StrategyPerformance } from '@/models/performance'
-import type { TradingMode } from '@/models/runtime'
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -217,12 +251,23 @@ interface StrategyRow extends StrategyPerformance {
 }
 
 // ---- 过滤 + 诊断 ----
-// 仅统计已平仓的期货交易 (deleted=1, pos_type=2)；跨日快照去重后按选中模式过滤。
+// 顺序：期货过滤 → 跨日去重 → 模式过滤 → 已实现/持仓中拆分。
+//
+// 期货过滤必须在模式过滤之前：期权仓位（pos_type=3，SYNC_ 开头）不在 manifest 里，
+// 放进去会被判为"未关联模式"，让诊断徽章虚增一批本就不属于统计范围的条目。
+//
+// 去重必须在拆分之前：同一笔仓位在 0811 快照为持仓中、0812 平仓，
+// dedupePositions 会保留 deleted=1 的那条，因此它只计入已实现、不会同时出现在
+// 持仓中分区（先拆分再去重会让同一笔被两侧重复统计）。
+//
 // 结算币回退命中的仓位与精确命中同等计入，仅在 quoteFallbacks 中单独记录。
 const filterResult = computed(() => {
-  const closed = rawPositions.value.filter((p) => p.deleted === 1 && p.pos_type === 2)
-  return filterPositionsByModes(dedupePositions(closed), modeIndex.value, selectedModes.value)
+  const futures = rawPositions.value.filter(isFuturesPosition)
+  return filterPositionsByModes(dedupePositions(futures), modeIndex.value, selectedModes.value)
 })
+
+/** 已实现 / 持仓中拆分：共用 positionSplit 的口径，与每日收益、策略详情一致 */
+const positionSplit = computed(() => splitRealizedAndOpen(filterResult.value.positions))
 
 /** 结算币兼容命中数（已计入统计，仅作数据源不一致提示） */
 const fallbackCount = computed(() => filterResult.value.quoteFallbacks.length)
@@ -243,7 +288,7 @@ const strategyList = computed<StrategyRow[]>(() => {
   const map = new Map<string, StrategyRow>()
   const groupModes = new Map<string, Set<'live' | 'smoking'>>()
 
-  for (const p of filterResult.value.positions) {
+  for (const p of positionSplit.value.realized) {
     const group = extractStrategyGroup(p.strategy_name)
     // 累计该策略命中的模式
     const match = resolveModes(p, modeIndex.value)
@@ -288,6 +333,63 @@ const strategyList = computed<StrategyRow[]>(() => {
 
   return Array.from(map.values()).sort((a, b) => b.total_pnl - a.total_pnl)
 })
+
+/** 持仓中的策略行：仅浮盈与笔数，沉到表格底部独立分区 */
+interface OpenStrategyRow {
+  strategy_name: string
+  open_trades: number
+  floating_pnl: number
+  modes: SelectableMode[]
+}
+
+/**
+ * 持仓中分区的数据源。
+ *
+ * 包含"该区间内只有持仓中、没有任何已平仓交易"的策略——这类策略此前会整行消失，
+ * 与「每日收益」显示的"持仓 N"矛盾（实测 20260812 VWAPMOM_15M_1 即此情况）。
+ * 已在上方已实现区出现的策略，这里仍会列出其未平仓部分，两者笔数不重叠。
+ */
+const openStrategyList = computed<OpenStrategyRow[]>(() => {
+  const map = new Map<string, OpenStrategyRow>()
+  // 模式需跨该组所有仓位累计：同一策略可能在 BTCUSDT 跑 live、ETHUSDT 跑 smoking，
+  // 只取首笔会漏掉另一个模式（与上方已实现区的 groupModes 保持一致的做法）
+  const groupModes = new Map<string, Set<SelectableMode>>()
+
+  for (const p of positionSplit.value.open) {
+    const group = extractStrategyGroup(p.strategy_name)
+
+    const match = resolveModes(p, modeIndex.value)
+    if (match) {
+      let gm = groupModes.get(group)
+      if (!gm) {
+        gm = new Set<SelectableMode>()
+        groupModes.set(group, gm)
+      }
+      if (match.modes.has('live')) gm.add('live')
+      if (match.modes.has('smoking')) gm.add('smoking')
+    }
+
+    const existing = map.get(group)
+    if (existing) {
+      existing.open_trades += 1
+      existing.floating_pnl += p.pnl_value
+    } else {
+      map.set(group, { strategy_name: group, open_trades: 1, floating_pnl: p.pnl_value, modes: [] })
+    }
+  }
+
+  for (const s of map.values()) {
+    const gm = groupModes.get(s.strategy_name)
+    s.modes = gm ? Array.from(gm) : []
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.floating_pnl - a.floating_pnl)
+})
+
+/** 空状态：已实现与持仓中都为空才算无数据 */
+const hasNoData = computed(
+  () => strategyList.value.length === 0 && openStrategyList.value.length === 0,
+)
 
 async function fetchData() {
   if (!dateRange.value || dateRange.value.length !== 2) return
@@ -541,6 +643,57 @@ onMounted(fetchData)
   .muted {
     color: #d1d5db;
   }
+}
+
+// 无已平仓交易时的占位行：与"暂无数据"区分——这里只是上半区为空
+.row-muted td {
+  color: #9ca3af;
+  font-size: 13px;
+  padding: 20px 16px;
+  text-align: center;
+}
+
+// 持仓中分区标题行：视觉上与已实现区隔开
+.section-row td {
+  background: #f9fafb;
+  border-top: 2px solid #e5e7eb;
+  text-align: left;
+  padding: 12px 16px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2563eb;
+  letter-spacing: 0.5px;
+}
+
+.section-hint {
+  margin-left: 10px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.open-row {
+  background: #fcfdff;
+
+  .col-floating-label {
+    color: #9ca3af;
+    font-size: 12px;
+  }
+}
+
+// 蓝色表示"进行中"而非盈/亏，与每日收益页的持仓标记保持一致
+.open-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
 }
 
 .more-btn {

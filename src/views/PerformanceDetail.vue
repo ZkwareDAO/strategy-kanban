@@ -12,7 +12,7 @@
 
     <div v-if="loading" class="state">加载中...</div>
     <div v-else-if="error" class="state error">{{ error }}</div>
-    <div v-else-if="symbolList.length === 0" class="state">该策略暂无交易数据</div>
+    <div v-else-if="hasNoData" class="state">该策略暂无交易数据</div>
 
     <div v-else class="table-wrapper">
       <table class="perf-table">
@@ -47,6 +47,32 @@
               <button class="more-btn" @click="goCandle(s.symbol)">更多</button>
             </td>
           </tr>
+
+          <tr v-if="symbolList.length === 0" class="row-muted">
+            <td colspan="11">该区间内无已平仓交易</td>
+          </tr>
+
+          <!-- 持仓中分区：沉到底部，浮盈随行情变动，不计入上方已实现指标 -->
+          <template v-if="openList.length > 0">
+            <tr class="section-row">
+              <td colspan="11">
+                <span class="section-title">持仓中</span>
+                <span class="section-hint">尚未平仓，浮盈随行情变动，不计入上方已实现指标</span>
+              </td>
+            </tr>
+            <tr v-for="o in openList" :key="`open-${o.symbol}`" class="open-row">
+              <td class="col-name">
+                {{ o.symbol }}
+                <span class="open-badge">持仓中</span>
+              </td>
+              <td>{{ o.open_trades }}</td>
+              <td colspan="7" class="col-floating-label">浮动盈亏</td>
+              <td :class="pnlClass(o.floating_pnl)">{{ fmtPnl(o.floating_pnl) }}</td>
+              <td>
+                <button class="more-btn" @click="goCandle(o.symbol)">更多</button>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>
@@ -60,6 +86,7 @@ import { getOrderPositions } from '@/api/performance'
 import { getRuntimesForDateRange } from '@/api/strategy'
 import { buildModeIndex, filterPositionsByModes, dedupePositions, findRuntimeForAsset, type SelectableMode, type ModeIndex } from '@/utils/modeFilter'
 import { accumulatePnlSplit, initPnlSplit } from '@/utils/perfAggregate'
+import { splitRealizedAndOpen, isFuturesPosition } from '@/utils/positionSplit'
 import type { OrderPosition, SymbolPerformance } from '@/models/performance'
 import type { Runtime } from '@/models/runtime'
 
@@ -115,8 +142,11 @@ function dateToEndOfDay(dateStr: string): Date {
   return new Date(Date.UTC(y, m - 1, d, 23, 59, 59))
 }
 
+/** 已实现 / 持仓中拆分：共用 positionSplit 的口径，与每日收益、区间统计一致 */
+const positionSplit = computed(() => splitRealizedAndOpen(rawPositions.value))
+
 const symbolList = computed<SymbolPerformance[]>(() => {
-  const closed = rawPositions.value.filter(p => p.deleted === 1 && p.pos_type === 2)
+  const closed = positionSplit.value.realized
   const map = new Map<string, SymbolPerformance>()
 
   for (const p of closed) {
@@ -152,6 +182,33 @@ const symbolList = computed<SymbolPerformance[]>(() => {
   return Array.from(map.values()).sort((a, b) => b.total_pnl - a.total_pnl)
 })
 
+/** 持仓中的标的（按币种聚合浮盈），沉到表格底部独立分区展示 */
+interface OpenSymbolRow {
+  symbol: string
+  open_trades: number
+  floating_pnl: number
+}
+
+const openList = computed<OpenSymbolRow[]>(() => {
+  const map = new Map<string, OpenSymbolRow>()
+  for (const p of positionSplit.value.open) {
+    const existing = map.get(p.asset)
+    if (existing) {
+      existing.open_trades += 1
+      existing.floating_pnl += p.pnl_value
+    } else {
+      map.set(p.asset, { symbol: p.asset, open_trades: 1, floating_pnl: p.pnl_value })
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => b.floating_pnl - a.floating_pnl)
+})
+
+/**
+ * 空状态判定：已实现与持仓中都为空才算"暂无交易数据"。
+ * 只看已实现会让"仅持仓中"的策略显示无数据——与每日收益的"持仓 N"矛盾。
+ */
+const hasNoData = computed(() => symbolList.value.length === 0 && openList.value.length === 0)
+
 async function fetchData() {
   if (!dateFrom || !dateTo) {
     loading.value = false
@@ -168,11 +225,15 @@ async function fetchData() {
     ])
     modeIndex.value = buildModeIndex(rangeRuntimes)
     runtimes.value = rangeRuntimes
-    // 1. 匹配策略组：strategy_name 以策略组名开头
+    // 1. 只保留期货仓位——期权（pos_type=3）不在 manifest 里，放进模式过滤
+    //    会被判为"未关联"，且本就不属于本页统计范围。与「区间统计」的顺序一致。
+    // 2. 匹配策略组：strategy_name 以策略组名开头
     //    （如 DOLPHINV2_4H_2_DOGEUSDT 匹配 DOLPHINV2_4H_2）
-    // 2. 跨日快照去重（同一笔未平仓位在每日 CSV 中重复出现）
-    // 3. 再按所选模式（Product/Smoking）过滤
+    // 3. 跨日快照去重（同一笔未平仓位在每日 CSV 中重复出现）
+    // 4. 再按所选模式（Product/Smoking）过滤
+    // 已实现 / 持仓中的拆分留到 positionSplit（去重之后），避免同一笔被两侧重复统计。
     const inStrategy = allPositions.filter(p => {
+      if (!isFuturesPosition(p)) return false
       if (p.strategy_name === props.strategyName) return true
       return p.strategy_name.startsWith(props.strategyName + '_')
     })
@@ -351,6 +412,56 @@ onMounted(fetchData)
     font-weight: 600;
     color: #1f2937;
   }
+}
+
+// 无已平仓交易时的占位行：与"暂无数据"区分——这里只是上半区为空
+.row-muted td {
+  color: #9ca3af;
+  font-size: 13px;
+  padding: 20px 16px;
+}
+
+// 持仓中分区标题行：视觉上与已实现区隔开
+.section-row td {
+  background: #f9fafb;
+  border-top: 2px solid #e5e7eb;
+  text-align: left;
+  padding: 12px 16px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2563eb;
+  letter-spacing: 0.5px;
+}
+
+.section-hint {
+  margin-left: 10px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.open-row {
+  background: #fcfdff;
+
+  .col-floating-label {
+    color: #9ca3af;
+    font-size: 12px;
+  }
+}
+
+// 蓝色表示"进行中"而非盈/亏，与每日收益页的持仓标记保持一致
+.open-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
 }
 
 .more-btn {
