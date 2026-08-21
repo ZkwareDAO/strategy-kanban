@@ -35,6 +35,7 @@ import {
   performanceRowsToCsv,
 } from './trades.mjs'
 import { planBacktestRuns, buildBacktestRun } from './backtest.mjs'
+import { planReplayData } from './replay.mjs'
 import { writeText, writeJson, ensureDir, removeDir, linkDir, LinkResult } from './fsx.mjs'
 
 const MS_PER_DAY = 86400000
@@ -79,7 +80,7 @@ const HELP = `示例数据生成器
   -h, --help   显示本帮助
 
 产物写入 sample-data/，并链接到 public/frontend-data、public/kline-data、
-public/backtest-output。已存在的真实目录或指向别处的软链不会被覆盖。
+public/backtest-output、public/data。已存在的真实目录或指向别处的软链不会被覆盖。
 `
 
 /**
@@ -179,10 +180,33 @@ function writeBacktestData(root, todayMs) {
   return runs.length
 }
 
-/** 建立 public/ 下的三个符号链接，返回被跳过路径的提示信息 */
+/** 生成每日回测数据（每日回放页数据源），返回 run 数量 */
+function writeReplayData(root, dates) {
+  const replayRoot = join(root, 'data')
+  const runs = planReplayData(dates)
+
+  for (const run of runs) {
+    // {所属日期}/backtest_results/{策略}/{运行日期}/{时刻}/{标的}/
+    const dir = join(
+      replayRoot,
+      run.dayDir,
+      'backtest_results',
+      run.strategyId,
+      run.dateDir,
+      run.timeDir,
+      run.symbol,
+    )
+    writeJson(join(dir, 'backtest_result.json'), run.result)
+    writeText(join(dir, 'backtest_equity.csv'), run.equityCsv)
+  }
+
+  return runs.length
+}
+
+/** 建立 public/ 下的符号链接，返回被跳过路径的提示信息 */
 function linkPublicDirs(repoRoot, sampleRoot) {
   const notes = []
-  const linkNames = ['frontend-data', 'kline-data', 'backtest-output']
+  const linkNames = ['frontend-data', 'kline-data', 'backtest-output', 'data']
 
   for (const name of linkNames) {
     const linkPath = join(repoRoot, 'public', name)
@@ -246,10 +270,13 @@ function main() {
   console.log('[sample-data] 合成历史回测...')
   const runCount = writeBacktestData(sampleRoot, todayMs)
 
+  console.log('[sample-data] 合成每日回测...')
+  const replayCount = writeReplayData(sampleRoot, dates)
+
   const runtimeCount = STRATEGIES.reduce((sum, s) => sum + s.symbols.length, 0)
   console.log(
     `[sample-data] 完成：${STRATEGIES.length} 个策略 / ${runtimeCount} 个运行实例 / ` +
-      `${positionCount} 条仓位 / ${runCount} 次回测`,
+      `${positionCount} 条仓位 / ${runCount} 次历史回测 / ${replayCount} 次每日回测`,
   )
 
   if (!opts.link) {

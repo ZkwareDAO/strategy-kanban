@@ -1,6 +1,5 @@
 /**
  * 技术指标颜色配置
- * 直接从 html_generator/config.py 移植
  */
 
 import type { IndicatorColors } from './types'

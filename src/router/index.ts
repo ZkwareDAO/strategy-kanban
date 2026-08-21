@@ -37,6 +37,11 @@ const router = createRouter({
       name: 'BacktestTokenList',
       component: () => import('@/views/BacktestTokenList.vue'),
     },
+    {
+      path: '/replay-token-list',
+      name: 'ReplayTokenList',
+      component: () => import('@/views/ReplayTokenList.vue'),
+    },
   ],
 })
 

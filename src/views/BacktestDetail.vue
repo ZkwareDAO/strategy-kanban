@@ -20,7 +20,7 @@
         <div v-if="equityData.length" ref="chartContainer" class="chart-container" />
         <div v-else class="chart-empty">
           <p>无权益曲线数据</p>
-          <p class="chart-empty-hint">请检查 backtest_equity.csv 是否存在于 /backtest-output/{{ btPath }}/</p>
+          <p class="chart-empty-hint">请检查 backtest_equity.csv 是否存在于 {{ dataBase }}/{{ btPath }}/</p>
         </div>
       </div>
 
@@ -163,7 +163,13 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Plotly, { type Data, type Layout, type Config } from 'plotly.js-dist-min'
-import { getBacktestResult, getBacktestEquity, getDailyKlineClose } from '@/api/backtest'
+import {
+  getBacktestResult,
+  getBacktestEquity,
+  getDailyKlineClose,
+  BACKTEST_BASE,
+  REPLAY_BASE,
+} from '@/api/backtest'
 import { formatSymbol } from '@/utils/display'
 import type { BacktestResult } from '@/models/backtest'
 import type { EquityPoint, DailyClosePoint } from '@/api/backtest'
@@ -179,6 +185,13 @@ const router = useRouter()
 const btPath = route.query.path as string
 const btDate = route.query.date as string
 const btTime = route.query.time as string
+/**
+ * 数据来源：'replay' 来自「每日回放」（/data），其余为「策略发现」（/backtest-output）。
+ *
+ * 两处的叶子目录结构与文件格式完全相同，故共用本页面，只需切换数据根。
+ */
+const isReplay = route.query.source === 'replay'
+const dataBase = isReplay ? REPLAY_BASE : BACKTEST_BASE
 
 const loading = ref(true)
 const error = ref('')
@@ -192,7 +205,7 @@ async function loadData() {
   error.value = ''
   try {
     // Step 1: fetch result first to get date range for price query
-    const res = await getBacktestResult(btPath)
+    const res = await getBacktestResult(btPath, dataBase)
     result.value = res
 
     const startDate = res?.config?.start_date ?? '2020-01-01'
@@ -200,7 +213,7 @@ async function loadData() {
 
     // Step 2: fetch equity and price in parallel
     const [equity, price] = await Promise.all([
-      getBacktestEquity(btPath),
+      getBacktestEquity(btPath, dataBase),
       getDailyKlineClose(props.symbol, startDate, endDate),
     ])
     equityData.value = equity
@@ -387,7 +400,8 @@ function goBack() {
     router.back()
     return
   }
-  router.push({ path: '/', query: { tab: 'backtest' } })
+  // 无历史时回到来源 tab，而非固定的策略发现
+  router.push({ path: '/', query: { tab: isReplay ? 'replay' : 'backtest' } })
 }
 
 onMounted(loadData)

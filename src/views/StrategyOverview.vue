@@ -8,12 +8,16 @@
     <!-- 模式切换 -->
     <el-tabs v-model="activeTab" class="mode-tabs">
       <el-tab-pane label="每日收益" name="strategy" />
+      <el-tab-pane label="每日回放" name="replay" />
       <el-tab-pane label="区间统计" name="performance" />
       <el-tab-pane label="策略发现" name="backtest" />
     </el-tabs>
 
     <!-- 回测详情 -->
     <backtest-overview v-if="activeTab === 'backtest'" />
+
+    <!-- 每日回放 -->
+    <daily-replay-overview v-else-if="activeTab === 'replay'" />
 
     <!-- 策略表现 -->
     <performance-overview v-else-if="activeTab === 'performance'" />
@@ -46,6 +50,7 @@ import type { StrategyPerformance, OrderPosition } from '@/models/performance'
 import StrategyList from '@/components/strategy/StrategyList.vue'
 import BacktestOverview from '@/components/BacktestOverview.vue'
 import PerformanceOverview from '@/components/PerformanceOverview.vue'
+import DailyReplayOverview from '@/components/DailyReplayOverview.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -53,7 +58,7 @@ const strategyStore = useStrategyStore()
 const appStore = useAppStore()
 
 const selectedDate = ref('')
-const activeTab = ref<'strategy' | 'backtest' | 'performance'>('strategy')
+const activeTab = ref<'strategy' | 'backtest' | 'performance' | 'replay'>('strategy')
 const orderPositions = ref<OrderPosition[]>([])
 
 /**
@@ -147,7 +152,7 @@ function handleViewPerformance(sourceStrategy: string) {
 onMounted(async () => {
   // 从详情页返回时，通过 query.tab 恢复到对应 tab
   const tabParam = route.query.tab as string
-  if (tabParam === 'backtest' || tabParam === 'performance') {
+  if (tabParam === 'backtest' || tabParam === 'performance' || tabParam === 'replay') {
     activeTab.value = tabParam
   }
 
@@ -170,10 +175,13 @@ onMounted(async () => {
 
 /**
  * 同步当前 tab 到 URL query.tab，使刷新/返回时能恢复正确 tab。
- * - strategy：移除 query.tab（避免残留 performance/backtest）
- * - backtest/performance：写入 query.tab
+ * - strategy：移除 query.tab（避免残留 performance/backtest/replay）
+ * - 其余：写入 query.tab
+ *
+ * 切回「每日收益」时顺带对齐日期：「每日回放」共用 appStore.date，
+ * 用户在那边翻过日期后，这边若仍显示旧日期会造成两个 tab 数据口径不一致。
  */
-watch(activeTab, (tab) => {
+watch(activeTab, async (tab) => {
   const query = { ...route.query }
   if (tab === 'strategy') {
     delete query.tab
@@ -181,6 +189,10 @@ watch(activeTab, (tab) => {
     query.tab = tab
   }
   router.replace({ query })
+
+  if (tab === 'strategy' && appStore.date && appStore.date !== selectedDate.value) {
+    await handleDateChange(appStore.date)
+  }
 })
 </script>
 

@@ -159,6 +159,22 @@ export interface BacktestOutputIndex {
 }
 
 /**
+ * 每日回放索引文件结构（public/replay-index.json）
+ *
+ * 与 BacktestOutputIndex 的区别是**按日期分桶**：每日回放页一次只展示一天，
+ * 平铺成单个 entries 数组会让前端每次切换日期都要在全量条目里过滤。
+ *
+ * key 为紧凑日期 YYYYMMDD（数据源的目录名），value 为该日的索引条目。
+ * 注意条目里的 `date` 是**回测运行日期**，跨零点运行时会比 key 大一天，
+ * 两者不可互相推导。
+ */
+export interface ReplayIndex {
+  /** 生成时间 ISO */
+  generated_at: string
+  days: Record<string, BacktestOutputEntry[]>
+}
+
+/**
  * 策略发现页的策略层级分组行。
  *
  * 分组键 = `${strategy}|${start_date}|${end_date}|${date}|${sweep}`：
@@ -170,8 +186,8 @@ export interface BacktestGroupRow {
   strategy: string
   /** 该组下所有标的（展示时用 `|` 连接） */
   symbols: string[]
-  /** 组内最佳年化收益（取所有标的 annualized_return 的最大值） */
-  best_annualized: number
+  /** 组内最佳 ROE（取所有标的 roe 的最大值） */
+  best_roe: number
   /** 回测区间开始日期 */
   start_date: string
   /** 回测区间结束日期 */

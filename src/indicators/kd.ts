@@ -1,7 +1,6 @@
 /**
  * KD (Stochastic Oscillator) 随机指标
  * 独立子图，显示K/D/J三条线
- * 参考: indicators.py:_compute_kdj_ema
  */
 
 import { BaseIndicator } from './base'

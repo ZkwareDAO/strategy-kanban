@@ -1,4 +1,14 @@
-import type { BacktestOutputEntry, BacktestOutputIndex, BacktestResult } from '@/models/backtest'
+import type {
+  BacktestOutputEntry,
+  BacktestOutputIndex,
+  BacktestResult,
+  ReplayIndex,
+} from '@/models/backtest'
+
+/** 策略发现的数据根：public/backtest-output 符号链接 */
+export const BACKTEST_BASE = '/backtest-output'
+/** 每日回放的数据根：public/data 符号链接（signal_comparison_output） */
+export const REPLAY_BASE = '/data'
 
 /** 权益曲线数据点 */
 export interface EquityPoint {
@@ -37,14 +47,61 @@ export async function getBacktestIndex(): Promise<BacktestOutputEntry[]> {
 }
 
 /**
+ * 每日回放索引的进程内缓存。
+ *
+ * 索引是**全部日期**的单个文件（约 850KB，gzip 后约 70KB）。用户在页面上按天
+ * 前后翻是最常见的操作，每次翻页都重新下载既慢又浪费；索引只在 dev 期回测
+ * 落盘时才变，故整体缓存、由 `replay-index-updated` 事件显式失效。
+ */
+let replayCache: Record<string, BacktestOutputEntry[]> | null = null
+
+/** 丢弃每日回放索引缓存（dev 期收到 `replay-index-updated` 事件时调用） */
+export function clearReplayIndexCache(): void {
+  replayCache = null
+}
+
+/**
+ * 获取某一天的每日回放索引条目。
+ *
+ * 索引由 vite 插件扫描 `public/data/{日期}/backtest_results/` 生成到
+ * /replay-index.json，结构与策略发现的索引同构，因此可直接喂给 `groupRuns`。
+ *
+ * 注意条目里的 `date` 是**回测运行日期**：跨零点运行时会比 `day` 大一天
+ * （例 day=20260819 的回测在 20260820 凌晨完成），两者不可互相推导。
+ *
+ * 保留了 `signals_processed === 0` 的条目，由展示层的 includeEmpty 决定是否过滤。
+ *
+ * @param day 紧凑日期 YYYYMMDD
+ * @returns 该日索引条目；日期不存在或任何失败均返回空数组（不抛错）
+ */
+export async function getReplayIndex(day: string): Promise<BacktestOutputEntry[]> {
+  if (!replayCache) {
+    try {
+      // 带时间戳绕过浏览器缓存，确保拿到刚重新生成的索引
+      const response = await fetch(`/replay-index.json?t=${Date.now()}`, { cache: 'no-store' })
+      if (!response.ok) return []
+      const data = (await response.json()) as ReplayIndex
+      replayCache = data.days ?? {}
+    } catch {
+      return []
+    }
+  }
+  return replayCache[day] ?? []
+}
+
+/**
  * 获取某个 run 的回测结果（backtest_result.json）。
  *
  * @param path 索引条目的 path，如 cta_ict_v3/20260629/101907/BTCUSDT
+ * @param base 数据根，默认策略发现的 /backtest-output；每日回放传 REPLAY_BASE
  * @returns 回测结果；失败或不存在返回 null（不抛错）
  */
-export async function getBacktestResult(path: string): Promise<BacktestResult | null> {
+export async function getBacktestResult(
+  path: string,
+  base: string = BACKTEST_BASE,
+): Promise<BacktestResult | null> {
   try {
-    const response = await fetch(`/backtest-output/${path}/backtest_result.json`)
+    const response = await fetch(`${base}/${path}/backtest_result.json`)
     if (!response.ok) return null
     return (await response.json()) as BacktestResult
   } catch {
@@ -55,19 +112,29 @@ export async function getBacktestResult(path: string): Promise<BacktestResult | 
 /**
  * 获取回测权益曲线数据（backtest_equity.csv）。
  * @param path 索引条目的 path，如 cta_ict_v3/20260629/101907/BTCUSDT
+ * @param base 数据根，默认策略发现的 /backtest-output；每日回放传 REPLAY_BASE
  * @returns 权益数据点数组；失败返回空数组
  */
-export async function getBacktestEquity(path: string): Promise<EquityPoint[]> {
+export async function getBacktestEquity(
+  path: string,
+  base: string = BACKTEST_BASE,
+): Promise<EquityPoint[]> {
+  const url = `${base}/${path}/backtest_equity.csv`
   try {
-    const response = await fetch(`/backtest-output/${path}/backtest_equity.csv`)
+    const response = await fetch(url)
     if (!response.ok) {
-      console.warn(`[backtest-equity] fetch failed: ${response.status} ${response.statusText} for /backtest-output/${path}/backtest_equity.csv`)
+      console.warn(
+        `[backtest-equity] fetch failed: ${response.status} ${response.statusText} for ${url}`,
+      )
       return []
     }
     const text = await response.text()
     // Guard against SPA fallback returning HTML instead of CSV
     if (!text.trim().startsWith('date')) {
-      console.warn(`[backtest-equity] unexpected content (not CSV) for /backtest-output/${path}/backtest_equity.csv, first 100 chars:`, text.slice(0, 100))
+      console.warn(
+        `[backtest-equity] unexpected content (not CSV) for ${url}, first 100 chars:`,
+        text.slice(0, 100),
+      )
       return []
     }
     const lines = text.trim().split('\n')

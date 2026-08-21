@@ -29,8 +29,10 @@ public/                              # 数据目录（真实目录或指向外�
 │       └── trading_positions_{YYYYMMDD}.csv
 ├── kline-data/                      # K线行情（必需）
 │   └── {period}/{SYMBOL}_{period}.csv
-└── backtest-output/                 # 历史回测（可选，策略发现页需要）
-    └── {strategy}/{YYYYMMDD}/{HHMMSS}/{SYMBOL}/
+├── backtest-output/                 # 历史回测（可选，策略发现页需要）
+│   └── {strategy}/{YYYYMMDD}/{HHMMSS}/{SYMBOL}/
+└── data/                            # 每日回测（可选，每日回放页需要）
+    └── {YYYYMMDD}/backtest_results/{strategy}/{YYYYMMDD}/{HHMMSS}/{SYMBOL}/
 ```
 
 ```
@@ -58,6 +60,10 @@ public/ 静态文件  ——fetch（无后端）——>  Vue 应用（Vite dev s
 按日查看各策略的标的、运行模式与仓位统计。
 
 <img src="docs/images/每日收益示例.png" width="900" alt="每日收益">
+
+### 每日回放
+
+按日查看当天各策略的回测结果，可用日期选择器前后翻页。当天跑完但未触发信号的策略默认隐藏，可通过「显示无信号策略」开关查看。
 
 ### 区间统计
 
@@ -121,8 +127,9 @@ npm run sample-data -- --help       # 查看全部参数
 
 产物位于 `sample-data/`（已在 `.gitignore` 中），删除该目录与 `public/` 下对应软链即可完全清除。
 
-> 示例数据仅覆盖有路由入口的页面。V1 详情页（`/detail/:strategy/:symbol`）依赖旧的
-> `public/data` 路径，不在生成范围内。
+> 示例数据覆盖每日收益、每日回放、区间统计、策略发现四个页面。V1 详情页
+> （`/detail/:strategy/:symbol`）依赖 `public/data/{日期}/pnl/` 下的旧格式数据，
+> 不在生成范围内——与每日回放用的 `public/data/{日期}/backtest_results/` 是不同子目录。
 
 
 ## 本地开发
@@ -134,7 +141,8 @@ npm install
 # 2. 准备数据目录（可以是真实目录，也可以是符号链接）
 ln -s /path/to/your-data/frontend-data   public/frontend-data
 ln -s /path/to/your-data/kline           public/kline-data
-ln -s /path/to/your-data/backtest_output public/backtest-output   # 可选
+ln -s /path/to/your-data/backtest_output public/backtest-output   # 可选，策略发现页
+ln -s /path/to/your-data/daily_output    public/data              # 可选，每日回放页
 
 # 3. 启动开发服务器
 npm run dev
@@ -152,6 +160,7 @@ npm run build
 # 数据目录（同上）
 ln -s /path/to/your-data/frontend-data public/frontend-data
 ln -s /path/to/your-data/kline         public/kline-data
+ln -s /path/to/your-data/daily_output  public/data              # 可选，每日回放页
 
 # 启动（开发模式即可用于局域网访问）
 npm run dev -- --host

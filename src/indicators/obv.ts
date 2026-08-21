@@ -1,7 +1,6 @@
 /**
  * OBV (On Balance Volume) 能量潮指标
  * 独立子图，显示OBV和OBV_MA两条线
- * 参考: indicators.py:compute_obv
  */
 
 import { BaseIndicator } from './base'

@@ -88,14 +88,21 @@ function assignSweeps(runs: RawRun[]): BacktestOutputEntry[] {
  * 从而保留全部历史记录。
  *
  * @param entries 索引条目（通常来自 buildIndex 或索引文件）
+ * @param options.includeEmpty 是否保留无信号（signals_processed === 0）的回测。
+ *   默认 false--策略发现页只关心真正产生过信号的回测。每日回放页把它做成
+ *   开关：某一天可能大部分策略都没触发信号，全部隐藏会让页面看起来是坏的，
+ *   用户需要能确认"确实跑了但没信号"。
  * @returns 分组行，按完成时间倒序
  */
-export function groupRuns(entries: BacktestOutputEntry[]): BacktestGroupRow[] {
+export function groupRuns(
+  entries: BacktestOutputEntry[],
+  options: { includeEmpty?: boolean } = {},
+): BacktestGroupRow[] {
   const map = new Map<string, BacktestGroupRow>()
 
   for (const entry of entries) {
-    // 空回测不展示
-    if (entry.signals_processed === 0) continue
+    // 空回测默认不展示
+    if (!options.includeEmpty && entry.signals_processed === 0) continue
 
     const startDate = entry.start_date ?? '?'
     const endDate = entry.end_date ?? '?'
@@ -108,7 +115,7 @@ export function groupRuns(entries: BacktestOutputEntry[]): BacktestGroupRow[] {
       row = {
         strategy: entry.strategy,
         symbols: [],
-        best_annualized: -Infinity,
+        best_roe: -Infinity,
         start_date: startDate,
         end_date: endDate,
         date: entry.date,
@@ -122,9 +129,9 @@ export function groupRuns(entries: BacktestOutputEntry[]): BacktestGroupRow[] {
     row.symbols.push(entry.symbol)
     row.token_entries.push(entry)
 
-    const annualized = entry.metrics?.annualized_return
-    if (typeof annualized === 'number' && Number.isFinite(annualized)) {
-      row.best_annualized = Math.max(row.best_annualized, annualized)
+    const roe = entry.metrics?.roe
+    if (typeof roe === 'number' && Number.isFinite(roe)) {
+      row.best_roe = Math.max(row.best_roe, roe)
     }
 
     const completedAt = completedKey(entry)

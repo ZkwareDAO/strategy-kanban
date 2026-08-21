@@ -1,7 +1,6 @@
 /**
  * ADX (Average Directional Index) 趋势强度指标
  * 独立子图，显示ADX/+DI/-DI三条线
- * 参考: indicators.py:compute_adx + new_dolphin_core.py:wilder_adx
  */
 
 import { BaseIndicator } from './base'

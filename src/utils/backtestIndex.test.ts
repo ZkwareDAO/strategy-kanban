@@ -13,7 +13,7 @@ function run(
   return { strategy, symbol, date, time, hasResult, ...extra }
 }
 
-/** 构造带区间与年化的 run（分组测试用） */
+/** 构造带区间与 ROE 的 run（分组测试用） */
 function runWith(
   strategy: string,
   symbol: string,
@@ -21,7 +21,7 @@ function runWith(
   time: string,
   start_date: string,
   end_date: string,
-  annualized_return?: number,
+  roe?: number,
   extra: Partial<RawRun> = {},
 ): RawRun {
   return {
@@ -34,7 +34,7 @@ function runWith(
     end_date,
     completed_at: `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}`,
     signals_processed: 100,
-    metrics: annualized_return === undefined ? {} : { annualized_return },
+    metrics: roe === undefined ? {} : { roe },
     ...extra,
   }
 }
@@ -150,7 +150,7 @@ describe('buildIndex', () => {
     expect(entry.end_date).toBe('2026-06-29')
     expect(entry.completed_at).toBe('2026-06-29T10:19:07')
     expect(entry.signals_processed).toBe(100)
-    expect(entry.metrics?.annualized_return).toBe(2.787)
+    expect(entry.metrics?.roe).toBe(2.787)
   })
 
   it('sorts entries by completed_at descending', () => {
@@ -187,7 +187,7 @@ describe('groupRuns', () => {
     const rows = groupRuns(entries)
     expect(rows).toHaveLength(1)
     expect(rows[0].symbols).toEqual(['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
-    expect(rows[0].best_annualized).toBe(2.0)
+    expect(rows[0].best_roe).toBe(2.0)
     expect(rows[0].token_entries).toHaveLength(3)
   })
 
@@ -198,8 +198,8 @@ describe('groupRuns', () => {
     ])
     const rows = groupRuns(entries)
     expect(rows).toHaveLength(2)
-    // 两行的 sweep 不同，年化各自独立
-    expect(rows.map(r => r.best_annualized).sort()).toEqual([0.568, 0.621])
+    // 两行的 sweep 不同，ROE 各自独立
+    expect(rows.map(r => r.best_roe).sort()).toEqual([0.568, 0.621])
     expect(new Set(rows.map(r => r.sweep)).size).toBe(2)
   })
 
@@ -254,17 +254,56 @@ describe('groupRuns', () => {
     expect(rows[0].symbols).toEqual(['ETHUSDT'])
   })
 
+  it('keeps empty backtests when includeEmpty is set', () => {
+    const entries = buildIndex([
+      runWith('a_v1', 'BTCUSDT', '20260630', '090000', '2025-01-01', '2026-06-30', 0.1, {
+        signals_processed: 0,
+      }),
+      runWith('a_v1', 'ETHUSDT', '20260630', '090001', '2025-01-01', '2026-06-30', 0.2),
+    ])
+    const rows = groupRuns(entries, { includeEmpty: true })
+    expect(rows).toHaveLength(1)
+    expect(rows[0].symbols).toEqual(['BTCUSDT', 'ETHUSDT'])
+  })
+
+  it('yields a row for a day whose runs are ALL empty when includeEmpty is set', () => {
+    // 每日回放的常见情形：当天跑了回测但没有一个策略触发信号。
+    // 默认口径下整天为空，开关打开后必须能看到"跑了但无信号"。
+    const entries = buildIndex([
+      runWith('a_v1', 'BTCUSDT', '20260630', '090000', '2025-01-01', '2026-06-30', 0, {
+        signals_processed: 0,
+      }),
+      runWith('a_v1', 'ETHUSDT', '20260630', '090001', '2025-01-01', '2026-06-30', 0, {
+        signals_processed: 0,
+      }),
+    ])
+    expect(groupRuns(entries)).toHaveLength(0)
+    expect(groupRuns(entries, { includeEmpty: true })).toHaveLength(1)
+  })
+
   it('keeps a row whose signals_processed is missing (field optional)', () => {
     const entries = buildIndex([run('a_v1', 'BTCUSDT', '20260630', '090000')])
     expect(groupRuns(entries)).toHaveLength(1)
   })
 
-  it('reports best_annualized as -Infinity when no token has a value', () => {
+  it('reports best_roe as -Infinity when no token has a value', () => {
     const entries = buildIndex([
       runWith('a_v1', 'BTCUSDT', '20260630', '090000', '2025-01-01', '2026-06-30', undefined),
     ])
     const rows = groupRuns(entries)
-    expect(Number.isFinite(rows[0].best_annualized)).toBe(false)
+    expect(Number.isFinite(rows[0].best_roe)).toBe(false)
+  })
+
+  it('takes best_roe from roe, ignoring annualized_return', () => {
+    // 列表页改为展示 ROE 后，年化仍留在索引里供标的层列表使用，
+    // 分组指标必须只认 roe--否则会串到旧字段上
+    const entries = buildIndex([
+      runWith('a_v1', 'BTCUSDT', '20260630', '090000', '2025-01-01', '2026-06-30', 0.3, {
+        metrics: { roe: 0.3, annualized_return: 9.9 },
+      }),
+    ])
+    const rows = groupRuns(entries)
+    expect(rows[0].best_roe).toBe(0.3)
   })
 
   it('loses no run when grouping a mixed history', () => {
@@ -320,7 +359,7 @@ describe('pickLatestPerSymbol', () => {
     expect(picked).toHaveLength(1)
     // 保留完成时间较晚的那次
     expect(picked[0].time).toBe('152900')
-    expect(picked[0].metrics?.annualized_return).toBe(0.621)
+    expect(picked[0].metrics?.roe).toBe(0.621)
   })
 
   it('keeps the latest across different run dates', () => {

@@ -2,27 +2,10 @@
   <div class="strategy-list">
     <!-- Toolbar: 日期选择 -->
     <div class="toolbar">
-      <div class="date-stepper">
-        <button
-          class="step-btn"
-          title="前一日"
-          @click="stepDate(-1)"
-        >‹</button>
-        <el-date-picker
-          :model-value="selectedDate"
-          type="date"
-          placeholder="选择日期"
-          format="YYYY-MM-DD"
-          value-format="YYYYMMDD"
-          @update:model-value="$emit('date-change', $event)"
-        />
-        <button
-          class="step-btn"
-          title="后一日"
-          :disabled="isNextDisabled"
-          @click="stepDate(1)"
-        >›</button>
-      </div>
+      <date-stepper
+        :model-value="selectedDate"
+        @update:model-value="$emit('date-change', $event)"
+      />
       <span class="row-count">{{ summaries.length }} 条策略</span>
     </div>
 
@@ -99,11 +82,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import type { StrategySummary, Runtime, TradingMode } from '@/models/runtime'
 import type { Position } from '@/models/position'
 import type { StrategyPerformance } from '@/models/performance'
 import TokenDisplay from './TokenDisplay.vue'
+import DateStepper from '@/components/common/DateStepper.vue'
 
 const props = defineProps<{
   summaries: StrategySummary[]
@@ -113,38 +96,11 @@ const props = defineProps<{
   performances?: Record<string, StrategyPerformance>
 }>()
 
-const emit = defineEmits<{
+defineEmits<{
   'view-position': [runtimeName: string, symbol: string]
   'view-performance': [strategyName: string]
   'date-change': [date: string]
 }>()
-
-// 日期步进：前一日 / 后一日
-function stepDate(delta: number): void {
-  const cur = props.selectedDate
-  if (!cur || !/^\d{8}$/.test(cur)) return
-  const y = Number(cur.slice(0, 4))
-  const m = Number(cur.slice(4, 6))
-  const d = Number(cur.slice(6, 8))
-  const dt = new Date(Date.UTC(y, m - 1, d))
-  dt.setUTCDate(dt.getUTCDate() + delta)
-  const next = dt.toISOString().slice(0, 10).replace(/-/g, '')
-  emit('date-change', next)
-}
-
-// 后一日不可超过今天
-const isNextDisabled = computed(() => {
-  const cur = props.selectedDate
-  if (!cur || !/^\d{8}$/.test(cur)) return false
-  const y = Number(cur.slice(0, 4))
-  const m = Number(cur.slice(4, 6))
-  const d = Number(cur.slice(6, 8))
-  const dt = new Date(Date.UTC(y, m - 1, d))
-  dt.setUTCDate(dt.getUTCDate() + 1)
-  const today = new Date()
-  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
-  return dt.getTime() > todayUtc
-})
 
 // 获取策略对应的所有标的及其交易模式（包括无仓位的）
 function getTokenInfoForStrategy(strategy: string): { token: string; mode: TradingMode; hasData: boolean }[] {
@@ -237,38 +193,6 @@ function pnlClass(pnl: number): string {
   gap: 16px;
   padding: 16px 20px;
   border-bottom: 1px solid #f0f0f0;
-}
-
-.date-stepper {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.step-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  border: 1px solid #dcdfe6;
-  background: #fff;
-  color: #606266;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  transition: all 0.15s;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  &:hover:not(:disabled) {
-    border-color: #3b82f6;
-    color: #3b82f6;
-  }
-
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
 }
 
 .row-count {

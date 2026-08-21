@@ -1,7 +1,6 @@
 /**
  * SMA (Simple Moving Average) 简单移动平均线
  * 叠加在主图上
- * 参考: indicators.py:compute_sma
  */
 
 import { BaseIndicator } from './base'

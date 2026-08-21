@@ -60,9 +60,14 @@ ln -s /path/to/your-data/frontend-data public/frontend-data
 rm -rf public/kline-data
 ln -s /path/to/your-data/kline public/kline-data
 
-# 3.3 历史回测（可选——「回测详情」tab 所需）
+# 3.3 历史回测（可选——「策略发现」tab 所需）
 rm -rf public/backtest-output
 ln -s /path/to/your-data/backtest_output public/backtest-output
+
+# 3.4 每日回测（可选——「每日回放」tab 所需）
+#     目录结构：{日期}/backtest_results/{策略}/{运行日期}/{时刻}/{标的}/
+rm -rf public/data
+ln -s /path/to/your-data/daily_output public/data
 
 # 4. 启动（局域网访问用开发模式即可）
 mkdir -p logs
@@ -187,7 +192,26 @@ backtest_output/<策略>/<YYYYMMDD>/<HHMMSS>/<标的>/
 索引构建逻辑（纯函数 `src/utils/backtestIndex.ts`）：
 
 - `buildIndex`：保留**全部**有 `backtest_result.json` 的 run，不做去重；按 (策略, 运行日期) 分配 `sweep`（同日轮次）；按完成时间倒序输出。
-- `groupRuns`：按 `strategy | start_date | end_date | date | sweep` 聚合成列表行，`signals_processed === 0` 的空回测过滤掉，按完成时间倒序。
+- `groupRuns`：按 `strategy | start_date | end_date | date | sweep` 聚合成列表行，按完成时间倒序。默认过滤 `signals_processed === 0` 的空回测；传 `{ includeEmpty: true }` 可保留（「每日回放」的开关用它）。
+
+### 每日回放索引
+
+同一个插件还会扫描 `public/data`，把每天的回测索引到 `public/replay-index.json`（同为生成物，已 gitignore）：
+
+- 数据源结构 `{所属日期}/backtest_results/{策略}/{运行日期}/{HHMMSS}/{标的}/`，叶子文件与历史回测同格式，故复用同一套 `scanRunTree` / `readSummary` / `buildIndex`。
+- 索引**按日期分桶**（`{ days: { "YYYYMMDD": [...] } }`）：页面一次只看一天，分桶避免前端在全量条目里过滤。前端整份缓存，靠 HMR 事件 `replay-index-updated` 失效。
+- 逐日调用 `buildIndex` 而非全量一次——`sweep` 按 (策略, 运行日期) 计算，跨日期混算会把不同天的 run 归进同一轮次。
+- 保留 `signals_processed === 0` 的条目（不在生成阶段过滤），由展示层的 `includeEmpty` 决定是否显示。
+
+三个容易踩的数据特征：
+
+| 特征 | 影响 |
+|------|------|
+| 外层「所属日期」≠ 内层「运行日期」 | 跨零点跑完的回测落在次日目录，两者不可互相推导 |
+| 日期目录可能混有非日期名（如 `20260727bak`） | 扫描以 `/^\d{8}$/` 过滤 |
+| 单日回测的 `config` 区间恒等于所属当天 | 因此「每日回放」列表不展示回测区间列 |
+
+> 数据源自带的 `{日期}/backtest_results/index.json` **不被前端使用**——它不含 metrics，列表页仍需逐标的拉取 `backtest_result.json`。自建索引内嵌指标，一天只需一个请求。
 
 `sweep` 的作用：回测脚本通常逐标的启动，同一批次的 `HHMMSS` 只相差几秒，若直接按 `HHMMSS` 分行会把一批切成很多只含单个标的的碎片行；但同一天对同一标的的**重跑**指标确实不同，必须各自保留。因此按 `time` 升序贪心分配轮次：每个 run 归入第一个"尚无该标的"的轮次，否则新开一轮。结果是同批次合并成一行、重跑各自成行，零丢失，且每行内标的不重复。
 
@@ -239,6 +263,11 @@ backtest_output/<策略>/<YYYYMMDD>/<HHMMSS>/<标的>/
 | 区间统计数据 | `ls public/frontend-data/trading_data/` 有 `trading_positions_*.csv` |
 | 回测输出目录 | `ls -la public/backtest-output` 存在（可选功能） |
 | 策略发现索引 | `cat public/backtest-output-index.json` 有 entries（dev 启动时自动生成），每条应含 `sweep` 与 `metrics` |
+| 每日回测目录 | `ls public/data/ \| tail -3` 有 `YYYYMMDD` 日期目录，且 `ls public/data/<最新日期>/backtest_results/` 有策略子目录（可选功能） |
+| 每日回放索引 | `python3 -c "import json;d=json.load(open('public/replay-index.json'));print(len(d['days']),'天')"` 天数大于 0（dev 启动时自动生成） |
+
+> 每日回测数据通常由定时任务在次日凌晨产出，因此「昨天」的目录可能尚不存在——
+> 以 `ls public/data/ | tail -3` 看到的最新日期为准，不要硬编码昨天的日期去查。
 
 ## 常见问题
 

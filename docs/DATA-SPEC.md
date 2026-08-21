@@ -28,13 +28,20 @@ public/
 │   └── {period}/                   # 1m / 5m / 15m / 30m / 1h / 2h / 4h / 8h / 1d
 │       └── {SYMBOL}_{period}.csv   # 如 BTCUSDT_1m.csv
 │
-└── backtest-output/                # 历史回测结果（可选，策略发现页需要）
-    └── {strategy}/                 # 策略目录名，如 cta_ict_v3
-        └── {YYYYMMDD}/             # 回测启动日期
-            └── {HHMMSS}/           # 回测启动时刻
-                └── {SYMBOL}/       # 交易对，如 BTCUSDT
-                    ├── backtest_result.json   # 必需，同时作为"回测完成"标志
-                    └── backtest_equity.csv    # 可选，权益曲线
+├── backtest-output/                # 历史回测结果（可选，策略发现页需要）
+│   └── {strategy}/                 # 策略目录名，如 cta_ict_v3
+│       └── {YYYYMMDD}/             # 回测启动日期
+│           └── {HHMMSS}/           # 回测启动时刻
+│               └── {SYMBOL}/       # 交易对，如 BTCUSDT
+│                   ├── backtest_result.json   # 必需，同时作为"回测完成"标志
+│                   └── backtest_equity.csv    # 可选，权益曲线
+│
+└── data/                           # 每日回测结果（可选，每日回放页需要）
+    └── {YYYYMMDD}/                 # 数据所属日期
+        └── backtest_results/       # 目录名固定
+            └── {strategy}/{YYYYMMDD}/{HHMMSS}/{SYMBOL}/
+                ├── backtest_result.json   # 必需，格式同 backtest-output
+                └── backtest_equity.csv    # 可选，权益曲线
 ```
 
 ### 目录说明
@@ -44,6 +51,7 @@ public/
 | `public/frontend-data` | 是 | 策略、持仓、对比、策略表现数据，按本规范组织 |
 | `public/kline-data` | 是 | K线 CSV 文件，按周期分目录 |
 | `public/backtest-output` | 否 | 历史回测结果，用于策略发现页（三层：策略列表 → 标的列表 → 回测详情） |
+| `public/data` | 否 | 每日回测结果，用于每日回放页（三层同上，但按日期翻页） |
 
 这些路径可以直接是真实目录，也可以是指向外部数据目录的符号链接。
 
@@ -508,6 +516,68 @@ date,equity,cash
 
 ---
 
+### 8. 每日回测数据（data）
+
+「每日回放」页的数据源。与第 7 节的 `backtest-output` 是**同一种回测报告**，区别只在组织方式：
+
+| | 策略发现（第 7 节） | 每日回放（本节） |
+|---|---|---|
+| 根目录 | `public/backtest-output` | `public/data` |
+| 组织方式 | 按策略与回测区间，累积全部历史 | 按**数据所属日期**分目录，每天一份 |
+| 页面时间控件 | 无（列表含全部历史） | 日期选择器 + 前一日/后一日（与「每日收益」一致） |
+| 回测区间 | 可跨月跨年，故列表展示区间列 | 通常就是所属当天，故不展示区间列 |
+
+#### 目录结构
+
+```
+data/{YYYYMMDD}/backtest_results/{strategy}/{YYYYMMDD}/{HHMMSS}/{SYMBOL}/
+├── backtest_result.json   # 必需，格式与第 7 节完全相同
+└── backtest_equity.csv    # 可选，格式与第 7 节完全相同
+```
+
+外层 `{YYYYMMDD}` 是**数据所属日期**，内层 `{YYYYMMDD}` 是**回测运行日期**。两者通常相同，但跨零点运行时内层会晚一天（例：所属 `20260102` 的回测在 `20260103` 凌晨才跑完），因此**不可互相推导**。
+
+文件格式与"回测完成"的判定规则与第 7 节一致：只有存在 `backtest_result.json` 的目录才会被索引。分组、同日轮次（`sweep`）、指标摘取全部复用同一套逻辑。
+
+#### 无信号回测
+
+同一天里常有大量策略跑完回测但未触发任何信号（`signals_processed` 为 0）。页面默认隐藏这些策略以突出真正有动作的策略，工具栏右上角的「显示无信号策略」开关可切换显示。当某天全部策略都无信号时，空态会明确提示，而不是让人误以为当天没跑回测。
+
+#### 索引文件
+
+`public/replay-index.json` 由同一个 Vite 插件在启动时自动扫描生成，**无需手动维护**，也不要提交到版本库。
+
+结构按日期分桶——页面一次只看一天，分桶可避免前端在全量条目里过滤：
+
+```jsonc
+{
+  "generated_at": "2026-01-04T00:12:31.882Z",
+  "days": {
+    "20260102": [
+      {
+        "strategy": "demo_strat_v2",
+        "symbol": "BTCUSDT",
+        "date": "20260103",         // 运行日期，跨零点时比所属日期晚一天
+        "time": "031500",
+        "path": "20260102/backtest_results/demo_strat_v2/20260103/031500/BTCUSDT",
+        "sweep": 0,
+        "start_date": "2026-01-02",
+        "end_date": "2026-01-02",
+        "completed_at": "2026-01-03T03:20:14.113402",
+        "signals_processed": 2,
+        "metrics": { "roe": 0.0134, "annualized_return": 0.5218, "total_return": 0.0134,
+                     "max_drawdown": 0.0041, "win_rate": 1.0, "total_trades": 1,
+                     "sharpe_ratio": 1.8822 }
+      }
+    ]
+  }
+}
+```
+
+> 数据源目录里若已有自带的 `backtest_results/index.json`，前端**不使用**它——那份索引不含 metrics，列表页仍需为每个标的单独拉取 `backtest_result.json`。自建索引把指标内嵌，一天只需一个请求。
+
+---
+
 ## strategies.json（策略元数据）
 
 策略的中文名、简介、逻辑说明与默认技术指标由**数据源提供**，前端不内置——这些属于使用方的策略资产。
@@ -576,6 +646,7 @@ date,equity,cash
 - [ ] `public/kline-data/{period}/{SYMBOL}_{period}.csv` — K线行情
 - [ ] `public/backtest-output/{strategy}/{YYYYMMDD}/{HHMMSS}/{SYMBOL}/backtest_result.json` — 回测结果（可选，需要"策略发现"页时准备）
 - [ ] `public/backtest-output/.../backtest_equity.csv` — 回测权益曲线（可选，详情页曲线需要）
+- [ ] `public/data/{YYYYMMDD}/backtest_results/.../backtest_result.json` — 每日回测结果（可选，需要"每日回放"页时准备）
 - [ ] `public/frontend-data/strategies.json` — 策略元数据（可选，用于展示策略中文名与逻辑说明）
 
 **最低运行要求**：只要有 `manifest.json`、`positions.json`（可为空数组）和 K线 CSV，前端即可运行并展示 K 线图。其他数据文件按需提供，缺失时前端优雅降级。

@@ -1,7 +1,6 @@
 /**
  * Envelope 均线包络通道指标
  * 叠加在主图上，显示上中下三条线
- * 参考: indicators.py:compute_envelope
  */
 
 import { BaseIndicator } from './base'
