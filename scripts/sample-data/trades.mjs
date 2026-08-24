@@ -335,9 +335,9 @@ export function buildComparison(strategy, symbol, compactDate, positions, backte
  * 构造 trading_positions_{date}.csv 的行
  *
  * **快照语义**：当天的文件既含当天平仓的仓位，也含此前开仓、当天仍持有的仓位。
- * 因此同一笔会在多天重复出现，前端按 (strategy_name, asset, created_at) 去重
- * （见 src/utils/modeFilter.ts 的 dedupePositions）——`created_at` 必须在各天
- * 保持一致，否则同一笔会被算成多笔。
+ * 因此同一笔会在多天重复出现，前端按 `id` 去重（见 src/utils/modeFilter.ts 的
+ * dedupePositions）——`id` 必须在各天保持一致，否则同一笔会被算成多笔。
+ * 故这里用开仓时刻（秒）派生 id，同一笔在任何一天都得到同一个值。
  *
  * `strategy_name` 格式为 `{dirName}_{SYMBOL}`（不含模式后缀），这样前端去掉
  * 末段 SYMBOL 后得到的策略组名正好等于 manifest 的 `strategy` 字段。
@@ -356,6 +356,7 @@ export function buildPerformanceRows(strategy, symbol, trades, dayStartMs, dayEn
     const pnlValue = isClosed ? round((t.realizedPnl / 100) * notional, 4) : 0
 
     rows.push({
+      id: `${strategy.dirName}_${symbol}_${Math.floor(t.entryTs / 1000)}`,
       asset: symbol,
       strategy_name: `${strategy.dirName}_${symbol}`,
       pos_type: 2,
@@ -371,7 +372,7 @@ export function buildPerformanceRows(strategy, symbol, trades, dayStartMs, dayEn
 
 /** 性能 CSV 表头（与 docs/DATA-SPEC.md 第 5 节一致） */
 export const PERFORMANCE_HEADER =
-  'asset,strategy_name,pos_type,pnl_value,deleted,created_at,close_time,leverage'
+  'id,asset,strategy_name,pos_type,pnl_value,deleted,created_at,close_time,leverage'
 
 /** 行数组序列化为 CSV */
 export function performanceRowsToCsv(rows) {
@@ -379,6 +380,7 @@ export function performanceRowsToCsv(rows) {
   for (const r of rows) {
     lines.push(
       [
+        r.id,
         r.asset,
         r.strategy_name,
         r.pos_type,

@@ -215,28 +215,37 @@ export function filterPositionsByModes(
  * 因此区间统计合并多日文件时，同一笔仓位会在多天各出现一次，
  * 若不去重会被重复计入 PNL 与交易数（实测 0805-0812 区间虚增 24.6% 交易笔数）。
  *
- * 以 (strategy_name, asset, created_at) 为仓位身份——同一策略同一币种的
- * 同一开仓时刻即同一笔。同键冲突时保留已平仓记录（deleted=1），
+ * 仓位身份取后端主键 `id`。同键冲突时保留已平仓记录（deleted=1），
  * 因为平仓那天的 pnl_value 才是最终值，未平仓快照里的只是中途浮盈。
  * 取舍会实质改变结果：实测某笔 XRPUSDC 未平快照为 +0.1073、平仓后为 -0.0488，
  * 保留错误的一条会让盈亏方向反转，并连带算错胜率。
  *
- * ## 已知限制：无法区分同秒开仓的多笔仓位
+ * ## 无 id 的历史数据（已知偏差，不做推断）
  *
- * CSV 没有 position_id 字段，仓位身份只能由上述三元组推断。若同一策略在
- * **同一币种、同一秒**开出两笔独立仓位，会被误合并为一条，导致少计一笔交易。
- * 实测 0805-0812 区间无此情况（73 个唯一身份均无同秒冲突），但高频策略
- * （分钟级或更快）存在触发可能。
+ * 早期生成的 CSV 没有 `id` 列，只能回退按
+ * (strategy_name, asset, created_at) 判定身份。该回退**会漏计**：数据源的
+ * `created_at` 被截断到整秒（上游原值为亚秒精度），同一策略同一币种在同一秒
+ * 开出的多笔独立仓位会塌成同一个键被误合并。
  *
- * 彻底解决需数据源侧在 CSV 中补 position_id——frontend_data 的 positions.json
- * 已有该字段（见 models/position.ts），trading_positions CSV 补齐后，
- * 此处应改用 position_id 作为身份键。
+ * 实测某 8H 策略单日有 4 笔因此被吞，例如同一币种的两笔：
+ *   id=1001  ...T00:01:02.103+08:00  → 00:01:02Z
+ *   id=1002  ...T00:01:02.817+08:00  → 00:01:02Z
+ * 两笔 pnl 完全相同，仅 id 与亚秒时间不同——因此**任何基于 CSV 内容的推断
+ * 都无法区分它们**。曾考虑把 close_time / pnl_value 拼进回退键，已否决：
+ * 同一笔仓位跨日的「持仓中 → 已平仓」两行这两个字段本就不同，拼进键会让它
+ * 被判成两笔，反向引入本函数要防的重复计数。
+ *
+ * 故老数据维持现状、不猜；准确性由数据源补齐 `id` 保证。
  */
 export function dedupePositions(positions: OrderPosition[]): OrderPosition[] {
   const byId = new Map<string, OrderPosition>()
 
   for (const p of positions) {
-    const id = `${p.strategy_name}|${p.asset}|${p.created_at}`
+    // `id|` 前缀隔开两套键空间，避免 id 取值与三元组拼接结果意外相同；
+    // 新旧文件混在同一区间时两种键并存，互不干扰。
+    const id = p.id
+      ? `id|${p.id}`
+      : `${p.strategy_name}|${p.asset}|${p.created_at}`
     const prev = byId.get(id)
     if (!prev) {
       byId.set(id, p)

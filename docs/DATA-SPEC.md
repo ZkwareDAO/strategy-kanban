@@ -242,26 +242,35 @@ public/
 
 ### 5. trading_positions_YYYYMMDD.csv
 
-策略表现页面的订单/仓位数据，每日一份 CSV。**仅需包含下表列出的 8 个字段**，其余订单系统元数据（user_id、order_id、margin 等）无需存储。
+策略表现页面的订单/仓位数据，每日一份 CSV。**仅需包含下表列出的 9 个字段**，其余订单系统元数据（user_id、order_id、margin 等）无需存储。
 
 前端按日期范围读取多日文件并在浏览器端聚合统计（按策略、按交易对计算胜率、盈亏等），无需后端 API。
 
 ```csv
-asset,strategy_name,pos_type,pnl_value,deleted,created_at,close_time,leverage
-BTCUSDT,NEWOBV_4H_1_BTCUSDT,2,1.092,0,2026-08-06T04:01:03+08:00,,5
-BTCUSDT,DOLPHINV2_4H_2_BTCUSDT,2,50.0,1,2026-08-06T16:45:00+08:00,2026-08-06T23:22:00+08:00,10
+id,asset,strategy_name,pos_type,pnl_value,deleted,created_at,close_time,leverage
+1001,BTCUSDT,NEWOBV_4H_1_BTCUSDT,2,1.092,0,2026-08-06T04:01:03+08:00,,5
+1002,BTCUSDT,DOLPHINV2_4H_2_BTCUSDT,2,50.0,1,2026-08-06T16:45:00+08:00,2026-08-06T23:22:00+08:00,10
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
+| `id` | string | 后端仓位主键，全局唯一。前端用它判定仓位身份（跨日快照去重）。见下方「仓位身份与去重」 |
 | `asset` | string | 交易对，如 `BTCUSDT` |
 | `strategy_name` | string | 策略名，格式 `{strategy_dir}_{SYMBOL}`（**不含 MODE 后缀**），如 `NEWOBV_4H_1_BTCUSDT`、`DOLPHINV2_4H_2_BTCUSDT` |
 | `pos_type` | number | 仓位类型：2=期货（前端仅统计此类型） |
 | `pnl_value` | number | 盈亏金额（计价货币） |
 | `deleted` | number | 是否已平仓：1=已平仓（前端仅统计已平仓订单），0=持仓中 |
-| `created_at` | string | 开仓时间（RFC 3339） |
+| `created_at` | string | 开仓时间（RFC 3339）。**截断到整秒**，同一秒可能有多笔不同仓位，不可作身份 |
 | `close_time` | string | 平仓时间（RFC 3339），持仓中为空 |
 | `leverage` | number | 杠杆倍数，用于区间统计页的「杠杆」列（取策略组内最大值）。缺失时按 `1` 处理 |
+
+**仓位身份与去重（关键）**：
+
+每日 CSV 是**快照语义** —— 当天的文件既含当天平仓的仓位，也含此前开仓、当天仍持有的仓位。因此同一笔仓位会在多天各出现一次，前端跨多日聚合时必须去重（见 `src/utils/modeFilter.ts` 的 `dedupePositions`），否则交易笔数与盈亏都会虚增。
+
+去重以 `id` 为身份。同一笔仓位在各天必须是**同一个 `id`**，否则会被算成多笔。
+
+`id` 缺失时前端回退按 `(strategy_name, asset, created_at)` 判定身份。**该回退不可靠**：`created_at` 截断到整秒，同一策略同一币种在同一秒开出的多笔独立仓位会被误合并成一笔，导致少算盈亏与交易数（实测某 8H 策略单日漏计 4 笔）。早期生成的历史 CSV 无 `id` 列，存在此已知偏差；新数据提供方**必须**输出 `id`。
 
 **策略关联规则（关键）**：
 

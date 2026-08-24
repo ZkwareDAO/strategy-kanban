@@ -1,5 +1,13 @@
 /** 策略表现 CSV 中的一条订单仓位记录（精简字段） */
 export interface OrderPosition {
+  /**
+   * 后端仓位主键，仓位身份的唯一依据（用于跨日快照去重）。
+   *
+   * 早期生成的历史 CSV 无此列，故为可选；缺失时 dedupePositions
+   * 回退按 (strategy_name, asset, created_at) 判定身份——该回退会把同一秒开出的
+   * 多笔独立仓位误合并，详见 utils/modeFilter.ts 的 dedupePositions。
+   */
+  id?: string
   /** 交易对，如 BTCUSDT */
   asset: string
   /** 策略名，格式 {strategy_dir}_{SYMBOL}，如 NEWOBV_4H_1_BTCUSDT */

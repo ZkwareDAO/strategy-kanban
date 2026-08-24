@@ -266,6 +266,82 @@ describe('dedupePositions', () => {
     const y = makePos('DIR_ETHUSDT', 'ETHUSDT', 1)
     expect(dedupePositions([x, y])).toHaveLength(2)
   })
+
+  /**
+   * 同秒开仓的多笔仓位必须靠 id 区分。
+   *
+   * 数据源把亚秒精度的 created_at 截断到整秒，实测某 8H 策略单日有 4 笔因此
+   * 被误合并，详情页比每日收益少算。两笔 pnl 完全相同、只有 id 不同——
+   * 正是无法靠内容推断的那种。
+   */
+  it('treats same-second positions with different ids as distinct', () => {
+    const first = makePos('DIR_XXXUSDT', 'XXXUSDT', -1.5, 5, {
+      id: '1001',
+      created_at: '2026-08-23T00:01:02Z',
+    })
+    const second = makePos('DIR_XXXUSDT', 'XXXUSDT', -1.5, 5, {
+      id: '1002',
+      created_at: '2026-08-23T00:01:02Z',
+    })
+    const out = dedupePositions([first, second])
+    expect(out).toHaveLength(2)
+    expect(out.map(p => p.id)).toEqual(['1001', '1002'])
+  })
+
+  it('still collapses the same id across daily snapshots, keeping the closed row', () => {
+    const openSnapshot = makePos('DIR_YYYUSDC', 'YYYUSDC', 0.5, 5, {
+      id: '1003',
+      deleted: 0,
+      close_time: null,
+    })
+    const closedSnapshot = makePos('DIR_YYYUSDC', 'YYYUSDC', -0.25, 5, {
+      id: '1003',
+      deleted: 1,
+      close_time: '2026-08-12T04:00:00Z',
+    })
+    const out = dedupePositions([openSnapshot, closedSnapshot])
+    expect(out).toHaveLength(1)
+    expect(out[0].deleted).toBe(1)
+    expect(out[0].pnl_value).toBe(-0.25)
+  })
+
+  it('falls back to the legacy key when id is absent', () => {
+    // 老数据（无 id 列）行为保持不变：同秒两笔仍被合并成一条。
+    // 这是已知偏差，不做推断——见 dedupePositions 的注释。
+    const a = makePos('DIR_XXXUSDT', 'XXXUSDT', -1.5, 5, {
+      created_at: '2026-08-23T00:01:02Z',
+    })
+    const b = makePos('DIR_XXXUSDT', 'XXXUSDT', -1.5, 5, {
+      created_at: '2026-08-23T00:01:02Z',
+    })
+    expect(dedupePositions([a, b])).toHaveLength(1)
+  })
+
+  it('treats an empty id as absent rather than as a shared key', () => {
+    // 若空串被当成有效 id，所有老数据行会共用 `id|` 这一个键而塌成一条。
+    const a = makePos('DIR_BTCUSDT', 'BTCUSDT', 1, 5, {
+      id: '',
+      created_at: '2026-08-23T00:01:01Z',
+    })
+    const b = makePos('DIR_ETHUSDT', 'ETHUSDT', 2, 5, {
+      id: '',
+      created_at: '2026-08-23T00:01:02Z',
+    })
+    expect(dedupePositions([a, b])).toHaveLength(2)
+  })
+
+  it('keeps id-bearing and legacy rows in separate key spaces', () => {
+    // 同一区间可能跨新旧文件：一条有 id，一条三元组恰好相同但无 id。
+    // 两套键空间不得互相污染（`id|` 前缀的作用）。
+    const withId = makePos('DIR_BTCUSDT', 'BTCUSDT', 5, 5, {
+      id: '1004',
+      created_at: '2026-08-23T00:01:02Z',
+    })
+    const legacy = makePos('DIR_BTCUSDT', 'BTCUSDT', 5, 5, {
+      created_at: '2026-08-23T00:01:02Z',
+    })
+    expect(dedupePositions([withId, legacy])).toHaveLength(2)
+  })
 })
 
 describe('findRuntimeForAsset', () => {

@@ -10,7 +10,11 @@ function toNumber(value: string | undefined, fallback = 0): number {
 }
 
 function csvRowToOrderPosition(row: Record<string, string>): OrderPosition {
+  // 空串归一为 undefined：老数据无 id 列时，若保留 '' 会让所有行拿到同一个
+  // 身份键而被去重成一条。缺失必须表达为 undefined，才能触发回退分支。
+  const rawId = row.id?.trim()
   return {
+    id: rawId ? rawId : undefined,
     asset: row.asset ?? '',
     strategy_name: row.strategy_name ?? '',
     pos_type: toNumber(row.pos_type, 0),
