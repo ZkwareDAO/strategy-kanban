@@ -20,6 +20,11 @@ export class ATRIndicator extends BaseIndicator {
     this.period = params.period ?? 14
   }
 
+  /** Wilder 平滑递推：TR 需前一根收盘价，首值落在 period+1，再取 3 倍 period 收敛 */
+  get warmupBars(): number {
+    return 1 + 3 * this.period
+  }
+
   compute(klineData: KlinePoint[]): IndicatorResult {
     const length = klineData.length
     const atr: (number | null)[] = new Array(length).fill(null)

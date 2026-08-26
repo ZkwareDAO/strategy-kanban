@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { addOneDay, enumerateDates, sliceCsvByDateRange, probeRange, streamFilterByDateRange } from '@/utils/klineRange'
+import { addOneDay, enumerateDates, sliceCsvByDateRange, sliceCsvBeforeDate, probeRange, streamFilterByDateRange } from '@/utils/klineRange'
 
 /**
  * 构造多日合成 K线 CSV（每行 open 值用于辨识行）
@@ -115,6 +115,63 @@ describe('klineRange utils', () => {
       const out = await sliceCsvByDateRange(csv.length, '2026-07-27', '2026-07-27', makeFetchRange(csv))
       expect(out[0].datetime).toBe('2026-07-27 00:00:00')
       expect(out[0].timestamp).toBe(Math.floor(Date.parse('2026-07-27T00:00:00+00:00') / 1000))
+    })
+  })
+
+  describe('sliceCsvBeforeDate (指标预热反向切片)', () => {
+    it('should return the last N bars strictly before the date', async () => {
+      const csv = buildCsv()
+      const out = await sliceCsvBeforeDate(csv.length, '2026-07-28', 2, makeFetchRange(csv))
+      // 2026-07-28 之前有 1,2,3,4；取最靠近的 2 根
+      expect(out.map(p => p.open)).toEqual([3, 4])
+    })
+
+    it('should keep ascending time order', async () => {
+      const csv = buildCsv()
+      const out = await sliceCsvBeforeDate(csv.length, '2026-07-29', 10, makeFetchRange(csv))
+      expect(out.map(p => p.open)).toEqual([1, 2, 3, 4, 5])
+    })
+
+    it('should exclude bars on the boundary date itself', async () => {
+      const csv = buildCsv()
+      const out = await sliceCsvBeforeDate(csv.length, '2026-07-27', 10, makeFetchRange(csv))
+      // 07-27 当天的 3,4 不算预热，只返回 07-26 的 1,2
+      expect(out.map(p => p.open)).toEqual([1, 2])
+    })
+
+    it('should return empty when no history exists before the date', async () => {
+      const csv = buildCsv()
+      const out = await sliceCsvBeforeDate(csv.length, '2026-07-26', 10, makeFetchRange(csv))
+      expect(out).toHaveLength(0)
+    })
+
+    it('should return empty when date is before all data', async () => {
+      const csv = buildCsv()
+      const out = await sliceCsvBeforeDate(csv.length, '2020-01-01', 10, makeFetchRange(csv))
+      expect(out).toHaveLength(0)
+    })
+
+    it('should return all available bars when maxBars exceeds file rows', async () => {
+      const csv = buildCsv()
+      const out = await sliceCsvBeforeDate(csv.length, '2030-01-01', 999, makeFetchRange(csv))
+      expect(out.map(p => p.open)).toEqual([1, 2, 3, 4, 5, 6])
+    })
+
+    it('should return empty for non-positive maxBars', async () => {
+      const csv = buildCsv()
+      expect(await sliceCsvBeforeDate(csv.length, '2026-07-29', 0, makeFetchRange(csv))).toHaveLength(0)
+    })
+
+    it('should return empty for empty file', async () => {
+      expect(await sliceCsvBeforeDate(0, '2026-07-29', 10, makeFetchRange(''))).toHaveLength(0)
+    })
+
+    it('should parse OHLC on returned warmup rows', async () => {
+      const csv = buildCsv()
+      const out = await sliceCsvBeforeDate(csv.length, '2026-07-28', 1, makeFetchRange(csv))
+      expect(out).toHaveLength(1)
+      expect(out[0].datetime).toBe('2026-07-27 00:01:00')
+      expect(out[0].close).toBe(4)
     })
   })
 

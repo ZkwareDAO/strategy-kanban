@@ -26,6 +26,14 @@ export class MACDIndicator extends BaseIndicator {
     this.signalPeriod = params.signal ?? 9
   }
 
+  /**
+   * 两级 EMA 递推：先在收盘价上算 slow EMA，再在 MACD 序列上算 signal EMA。
+   * 首值需 slow+signal-1 根，取 3 倍让两级平滑都收敛。
+   */
+  get warmupBars(): number {
+    return 3 * (this.slowPeriod + this.signalPeriod)
+  }
+
   compute(klineData: KlinePoint[]): IndicatorResult {
     const closes = klineData.map(d => d.close)
     const length = klineData.length

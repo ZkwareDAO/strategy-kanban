@@ -24,6 +24,14 @@ export class KDIndicator extends BaseIndicator {
     this.dPeriod = params.d_period ?? 3
   }
 
+  /**
+   * RSV 需 kPeriod 根窗口，K = EMA(RSV)、D = EMA(K) 为两级递推。
+   * 取 3 倍两周期之和，让 K/D 都收敛。
+   */
+  get warmupBars(): number {
+    return 3 * (this.kPeriod + this.dPeriod)
+  }
+
   compute(klineData: KlinePoint[]): IndicatorResult {
     const highs = klineData.map(d => d.high)
     const lows = klineData.map(d => d.low)

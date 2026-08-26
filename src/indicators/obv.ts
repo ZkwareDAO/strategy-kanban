@@ -21,6 +21,14 @@ export class OBVIndicator extends BaseIndicator {
     this.maPeriod = params.ma_period ?? 20
   }
 
+  /**
+   * OBV 主线从第 0 根起累积，绝对量级由起点决定（路径相关，无「正确」起点），
+   * 预热只为让 obv_ma 的 maPeriod 窗口填满。
+   */
+  get warmupBars(): number {
+    return this.maPeriod
+  }
+
   compute(klineData: KlinePoint[]): IndicatorResult {
     const closes = klineData.map(d => d.close)
     const volumes = klineData.map(d => d.volume ?? 0)

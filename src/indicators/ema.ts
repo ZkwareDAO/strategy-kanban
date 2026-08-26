@@ -23,6 +23,11 @@ export class EMAIndicator extends BaseIndicator {
     this.slowPeriod = params.slow_period ?? 120
   }
 
+  /** EMA 递推：以慢线为准（两条线同图，慢线收敛最晚），取 3 倍周期 */
+  get warmupBars(): number {
+    return 3 * Math.max(this.fastPeriod, this.slowPeriod)
+  }
+
   compute(klineData: KlinePoint[]): IndicatorResult {
     const closes = klineData.map(d => d.close)
     const length = klineData.length

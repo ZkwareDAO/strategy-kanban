@@ -16,6 +16,12 @@ export type RangeFetcher = (start: number, end: number) => Promise<string>
 const PROBE_CHUNK = 8192
 /** 切片时向区间两侧外扩的余量字节，覆盖跨块边界的行 */
 const SLICE_MARGIN = 4096
+/**
+ * 单行字节数上界，用于反向切片时估算「往前读多少字节能覆盖 N 根」。
+ * 实测各周期 CSV 行宽 68~80 字节（`2026-01-02 00:00:00+00:00,100.0,...` 形式），
+ * 取 96 留足余量；估算偏大只是多读几 KB，偏小则会取不够根数。
+ */
+const ROW_BYTES_UPPER_BOUND = 96
 
 /**
  * 日期加一天，返回 YYYY-MM-DD（正确处理月末/年末/闰年）
@@ -129,6 +135,49 @@ export async function sliceCsvByDateRange(
   const chunk = await fetchRange(lo, hi)
   const parsed = parseKlineRaw(chunk)
   return filterKlineByDateRange(parsed, startDate, endDate)
+}
+
+/**
+ * 用 HTTP Range 反向切片，返回 `beforeDate` **之前**的最后 `maxBars` 根 K线。
+ *
+ * 用于技术指标预热：指标都是滚动窗口或递归平滑算法，前若干根必然为 null，
+ * 若加载区间等于展示区间，图表开头就会缺一段指标。这里取业务区间之前的历史 bar
+ * 补足计算所需，这些 bar 只参与 compute 不参与显示。
+ *
+ * @param fileSize 文件总字节数
+ * @param beforeDate 业务区间起始日期 YYYY-MM-DD（返回的 bar 全部早于这一天）
+ * @param maxBars 最多返回多少根（取最靠近 beforeDate 的那些）
+ * @param fetchRange Range 读取回调
+ * @returns 按时间升序的 K线；`beforeDate` 早于文件全部数据时为空数组
+ */
+export async function sliceCsvBeforeDate(
+  fileSize: number,
+  beforeDate: string,
+  maxBars: number,
+  fetchRange: RangeFetcher,
+): Promise<RawKlinePoint[]> {
+  if (fileSize <= 0 || maxBars <= 0) return []
+
+  // 定位表头结束（第一条数据行起点）
+  const headEnd = Math.min(fileSize - 1, PROBE_CHUNK - 1)
+  const headChunk = await fetchRange(0, headEnd)
+  const firstNl = headChunk.indexOf('\n')
+  const headerEnd = firstNl === -1 ? 0 : firstNl + 1
+
+  // beforeDate 首行的偏移即预热段的右边界（exclusive）
+  const endExclusive = await findFirstAtOrAfter(fileSize, headerEnd, beforeDate, fetchRange)
+  // 全部数据都 >= beforeDate：这一天之前没有历史，无法预热
+  if (endExclusive <= headerEnd) return []
+
+  // 往前读足够覆盖 maxBars 根的字节；SLICE_MARGIN 兜住被截断的首行
+  const want = maxBars * ROW_BYTES_UPPER_BOUND + SLICE_MARGIN
+  const lo = Math.max(headerEnd, endExclusive - want)
+  const chunk = await fetchRange(lo, Math.min(fileSize - 1, endExclusive))
+
+  // 以日期为真值过滤（字节估算可能多读，也可能读进 beforeDate 当天的行）
+  const parsed = parseKlineRaw(chunk).filter(p => p.datetime.slice(0, 10) < beforeDate)
+  // 取最靠近 beforeDate 的 maxBars 根，保持时间升序
+  return parsed.slice(-maxBars)
 }
 
 /** probeRange 返回 */

@@ -66,6 +66,26 @@ export function createIndicators(
     .map(type => createIndicator(type, params?.[type]))
 }
 
+/**
+ * 计算一组指标所需的预热 K线根数 = 各指标 [[BaseIndicator.warmupBars]] 的最大值。
+ *
+ * 同一张图上各指标窗口长短不一（短窗口指标几十根即收敛，长窗口指标可能要数百根），
+ * 取最大值才能保证第一根可见 K线上**所有**指标都已有收敛值——否则短窗口指标先出现、
+ * 长窗口指标仍留空白，正是本次要修的现象。
+ *
+ * @param types 已选指标
+ * @param params 来自策略元数据的参数覆盖；缺省时各指标用自身默认参数
+ * @returns 预热根数；未选任何指标时为 0
+ */
+export function warmupBarsFor(
+  types: IndicatorType[],
+  params?: IndicatorFactoryParams
+): number {
+  const indicators = createIndicators(types, params)
+  if (indicators.length === 0) return 0
+  return Math.max(...indicators.map(i => i.warmupBars))
+}
+
 export { BaseIndicator } from './base'
 export * from './types'
 export * from './config'

@@ -23,6 +23,14 @@ interface Props {
   indicators?: IndicatorType[]
   displayCount?: number
   backplaySignals?: BacktestSignal[]
+  /**
+   * `klineData` 开头有多少根属于「指标预热段」——只参与指标计算，不参与显示。
+   *
+   * 指标都是滚动窗口或递归平滑算法，前若干根必然为 null。父组件在业务区间之前
+   * 额外加载这些历史 bar（见 `api/klineWarmup`），使第一根**可见** K线上所有指标
+   * 都已有收敛值；若把预热 bar 一并画出来，开头缺失只是往前平移而非修好。
+   */
+  warmupCount?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -30,6 +38,7 @@ const props = withDefaults(defineProps<Props>(), {
   symbol: '',
   indicators: () => ['RSI', 'MACD', 'ATR'] as IndicatorType[],
   displayCount: 100,
+  warmupCount: 0,
 })
 
 const emit = defineEmits<{
@@ -44,7 +53,7 @@ onMounted(() => {
   renderChart()
 })
 
-watch([() => props.klineData, () => props.strategy, () => props.indicators, () => props.displayCount, () => props.backplaySignals], () => {
+watch([() => props.klineData, () => props.strategy, () => props.indicators, () => props.displayCount, () => props.backplaySignals, () => props.warmupCount], () => {
   renderChart()
 }, { deep: true })
 
@@ -57,8 +66,14 @@ function getIndicatorParams(strategyDir: string) {
 function renderChart() {
   if (!chartContainer.value || props.klineData.length === 0) return
 
-  // 使用全量数据，不截断
-  const displayData = props.klineData
+  // 指标用全量数据计算（含预热段），但只展示业务段。
+  // 预热段的作用是让第一根可见 K线上各指标已有收敛值；若把它一起画出来，
+  // 图表开头依然会缺一段指标——缺失只是往前平移了。
+  const warmupCount = Math.max(0, Math.min(props.warmupCount, props.klineData.length))
+  const computeData = props.klineData
+  const displayData = warmupCount > 0 ? props.klineData.slice(warmupCount) : props.klineData
+  if (displayData.length === 0) return
+
   const timestamps = displayData.map(d => d.datetime)
   const indicatorParams = getIndicatorParams(props.strategy)
   const indicators = createIndicators(props.indicators, indicatorParams)
@@ -91,10 +106,23 @@ function renderChart() {
   const traces: Data[] = []
 
   // Compute indicators first to get values for hover text
+  //
+  // 用 computeData（含预热段）计算，再按 warmupCount 裁掉预热部分，
+  // 使结果数组下标与 displayData / timestamps 对齐——后续 getIndicatorText(index)
+  // 与 getTraces 都直接按下标取值，对齐后无需再做偏移换算。
   const indicatorValues: Record<string, IndicatorResult> = {}
   for (const indicator of indicators) {
-    const result = indicator.compute(displayData)
-    indicatorValues[indicator.name] = result
+    const full = indicator.compute(computeData)
+    if (warmupCount === 0) {
+      indicatorValues[indicator.name] = full
+      continue
+    }
+    const trimmed: IndicatorResult = {}
+    for (const [key, values] of Object.entries(full)) {
+      // 阈值线等常量数组长度可能与 K线不同，长度一致时才裁剪
+      trimmed[key] = values.length === computeData.length ? values.slice(warmupCount) : values
+    }
+    indicatorValues[indicator.name] = trimmed
   }
 
   // Build hover text for candlestick (basic info only)

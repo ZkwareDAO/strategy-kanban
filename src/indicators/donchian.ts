@@ -21,6 +21,11 @@ export class DonchianIndicator extends BaseIndicator {
     this.period = params.period ?? 120
   }
 
+  /** 唐奇安通道：滚动窗口极值，第 period 根即精确 */
+  get warmupBars(): number {
+    return this.period
+  }
+
   compute(klineData: KlinePoint[]): IndicatorResult {
     const highs = klineData.map(d => d.high)
     const lows = klineData.map(d => d.low)

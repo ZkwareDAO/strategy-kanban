@@ -21,6 +21,11 @@ export class SMAIndicator extends BaseIndicator {
     this.period = params.period ?? 20
   }
 
+  /** 简单移动平均：窗口类，第 period 根即精确，取 period */
+  get warmupBars(): number {
+    return this.period
+  }
+
   compute(klineData: KlinePoint[]): IndicatorResult {
     const closes = klineData.map(d => d.close)
     const length = klineData.length

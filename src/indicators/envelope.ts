@@ -27,6 +27,11 @@ export class EnvelopeIndicator extends BaseIndicator {
     this.lowerPct = params.lower_pct ?? 0.618
   }
 
+  /** 包络通道：中轨为 period 窗口均值，上下轨是其百分比偏移，第 period 根即精确 */
+  get warmupBars(): number {
+    return this.period
+  }
+
   compute(klineData: KlinePoint[]): IndicatorResult {
     const closes = klineData.map(d => d.close)
     const length = klineData.length

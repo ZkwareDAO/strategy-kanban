@@ -26,6 +26,11 @@ export class RSIndicator extends BaseIndicator {
     this.lowerThreshold = params.lowerThreshold ?? 30
   }
 
+  /** Wilder 平滑递推：首值需 period+1 根，再取 3 倍 period 让平滑收敛 */
+  get warmupBars(): number {
+    return 1 + 3 * this.period
+  }
+
   compute(klineData: KlinePoint[]): IndicatorResult {
     const closes = klineData.map(d => d.close)
     const rsi: (number | null)[] = new Array(klineData.length).fill(null)

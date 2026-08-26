@@ -21,6 +21,14 @@ export class ADXIndicator extends BaseIndicator {
     this.period = params.period ?? 14
   }
 
+  /**
+   * 两级 Wilder 平滑：先平滑 DM/TR 得到 DI/DX（首值在 period），再平滑 DX 得到 ADX
+   * （首值在 period*2-1）。取 3 倍该长度让 ADX 递推收敛。
+   */
+  get warmupBars(): number {
+    return 6 * this.period
+  }
+
   compute(klineData: KlinePoint[]): IndicatorResult {
     const highs = klineData.map(d => d.high)
     const lows = klineData.map(d => d.low)

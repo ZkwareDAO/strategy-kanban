@@ -24,6 +24,11 @@ export class BOLLIndicator extends BaseIndicator {
     this.stdDev = params.std_dev ?? 2.0
   }
 
+  /** 布林带：中轨均值与标准差都是 period 窗口，第 period 根即精确 */
+  get warmupBars(): number {
+    return this.period
+  }
+
   compute(klineData: KlinePoint[]): IndicatorResult {
     const closes = klineData.map(d => d.close)
     const length = klineData.length
