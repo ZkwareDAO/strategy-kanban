@@ -188,7 +188,58 @@ describe('groupRuns', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].symbols).toEqual(['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
     expect(rows[0].best_roe).toBe(2.0)
+    expect(rows[0].total_roe).toBe(3.5)
     expect(rows[0].token_entries).toHaveLength(3)
+  })
+
+  it('sums total_roe across tokens including negatives', () => {
+    // 各标的 cash/leverage 一致，等权求和即整组收益率；亏损标的必须拉低合计
+    const entries = buildIndex([
+      runWith('a_v1', 'BTCUSDT', '20260630', '090000', '2025-01-01', '2026-06-30', 0.5),
+      runWith('a_v1', 'ETHUSDT', '20260630', '090001', '2025-01-01', '2026-06-30', -0.2),
+      runWith('a_v1', 'SOLUSDT', '20260630', '090002', '2025-01-01', '2026-06-30', -0.1),
+    ])
+    const rows = groupRuns(entries)
+    expect(rows[0].total_roe).toBeCloseTo(0.2, 10)
+    // 最佳仍是最大值，两个口径互不影响
+    expect(rows[0].best_roe).toBe(0.5)
+  })
+
+  it('skips tokens without roe when summing total_roe', () => {
+    const entries = buildIndex([
+      runWith('a_v1', 'BTCUSDT', '20260630', '090000', '2025-01-01', '2026-06-30', 0.3),
+      runWith('a_v1', 'ETHUSDT', '20260630', '090001', '2025-01-01', '2026-06-30', undefined),
+    ])
+    const rows = groupRuns(entries)
+    expect(rows[0].total_roe).toBe(0.3)
+  })
+
+  it('reports total_roe as NaN when no token has a value', () => {
+    // 用 NaN 而非 0：合计恰好为 0（盈亏抵消）与"整组无数据"必须能区分
+    const entries = buildIndex([
+      runWith('a_v1', 'BTCUSDT', '20260630', '090000', '2025-01-01', '2026-06-30', undefined),
+    ])
+    const rows = groupRuns(entries)
+    expect(Number.isFinite(rows[0].total_roe)).toBe(false)
+  })
+
+  it('keeps total_roe at 0 when tokens cancel out', () => {
+    const entries = buildIndex([
+      runWith('a_v1', 'BTCUSDT', '20260630', '090000', '2025-01-01', '2026-06-30', 0.25),
+      runWith('a_v1', 'ETHUSDT', '20260630', '090001', '2025-01-01', '2026-06-30', -0.25),
+    ])
+    const rows = groupRuns(entries)
+    expect(rows[0].total_roe).toBe(0)
+    expect(Number.isFinite(rows[0].total_roe)).toBe(true)
+  })
+
+  it('sums total_roe per sweep, not across same-day reruns', () => {
+    const entries = buildIndex([
+      runWith('obv_atr_v2', 'BTCUSDT', '20260623', '092753', '2025-01-01', '2026-06-23', 0.1),
+      runWith('obv_atr_v2', 'BTCUSDT', '20260623', '152900', '2025-01-01', '2026-06-23', 0.2),
+    ])
+    const rows = groupRuns(entries)
+    expect(rows.map(r => r.total_roe).sort()).toEqual([0.1, 0.2])
   })
 
   it('splits a same-day rerun into a separate row (history preserved)', () => {

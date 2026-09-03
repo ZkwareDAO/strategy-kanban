@@ -188,6 +188,14 @@ export interface BacktestGroupRow {
   symbols: string[]
   /** 组内最佳 ROE（取所有标的 roe 的最大值） */
   best_roe: number
+  /**
+   * 组内总计 ROE（所有标的 roe 之和）。
+   *
+   * 直接相加的前提是各标的用同一套 cash/leverage 参数（当前回测脚本即如此），
+   * 此时等权求和才等于整组资金的收益率。
+   * 无任何标的带 roe 时为 NaN--0 会被误读成"打平"。
+   */
+  total_roe: number
   /** 回测区间开始日期 */
   start_date: string
   /** 回测区间结束日期 */

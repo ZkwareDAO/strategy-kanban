@@ -116,6 +116,7 @@ export function groupRuns(
         strategy: entry.strategy,
         symbols: [],
         best_roe: -Infinity,
+        total_roe: NaN,
         start_date: startDate,
         end_date: endDate,
         date: entry.date,
@@ -132,6 +133,8 @@ export function groupRuns(
     const roe = entry.metrics?.roe
     if (typeof roe === 'number' && Number.isFinite(roe)) {
       row.best_roe = Math.max(row.best_roe, roe)
+      // 从 NaN 起步、首个有效值直接赋值：区分"整组无 roe"与"合计恰好为 0"
+      row.total_roe = Number.isFinite(row.total_roe) ? row.total_roe + roe : roe
     }
 
     const completedAt = completedKey(entry)

@@ -41,8 +41,8 @@
               策略名称 <span class="sort-arrow">{{ sortArrow('strategy') }}</span>
             </th>
             <th>标的</th>
-            <th class="sortable" @click="toggleSort('best_roe')">
-              最佳 ROE <span class="sort-arrow">{{ sortArrow('best_roe') }}</span>
+            <th class="sortable" :title="TOTAL_ROE_HINT" @click="toggleSort('total_roe')">
+              总计 ROE <span class="sort-arrow">{{ sortArrow('total_roe') }}</span>
             </th>
             <th class="sortable" @click="toggleSort('signals')">
               信号数 <span class="sort-arrow">{{ sortArrow('signals') }}</span>
@@ -61,7 +61,9 @@
                 {{ formatSymbol(sym) }}<span v-if="i < g.symbols.length - 1" class="sep">|</span>
               </span>
             </td>
-            <td :class="pctClass(g.best_roe)">{{ fmtPct(g.best_roe) }}</td>
+            <td :class="pctClass(g.total_roe)" :title="roeBreakdown(g)">
+              {{ fmtPct(g.total_roe) }}
+            </td>
             <td :class="{ 'val-muted': signalCount(g) === 0 }">{{ signalCount(g) }}</td>
             <td class="col-time">{{ formatCompletedAt(g.completed_at) }}</td>
             <td>
@@ -105,6 +107,9 @@ const PAGE_SIZE = 20
 const EMPTY_SWITCH_HINT =
   '无信号策略指当天跑完回测但未触发任何交易信号，默认隐藏以突出真正有动作的策略'
 
+const TOTAL_ROE_HINT =
+  '该策略当天所有标的 ROE 之和（各标的本金与杠杆一致，故可直接相加）。鼠标悬停单元格可看各标的明细'
+
 const loading = ref(false)
 const entries = ref<BacktestOutputEntry[]>([])
 const selectedStrategy = ref('')
@@ -114,9 +119,9 @@ const includeEmpty = ref(false)
 // 与「每日收益」共享 store 里的日期：两个 tab 间来回切换不必重新选一次
 const selectedDate = ref(appStore.date || compactDaysAgo(1))
 
-type SortKey = 'strategy' | 'best_roe' | 'signals' | 'completed_at'
-// 默认按最佳 ROE 倒序：一天之内完成时间都挨在一起，按表现排更有信息量
-const sortKey = ref<SortKey>('best_roe')
+type SortKey = 'strategy' | 'total_roe' | 'signals' | 'completed_at'
+// 默认按总计 ROE 倒序：一天之内完成时间都挨在一起，按表现排更有信息量
+const sortKey = ref<SortKey>('total_roe')
 const sortAsc = ref(false)
 
 // 分组逻辑与策略发现完全一致（同构数据源），仅空回测的取舍交给开关
@@ -155,9 +160,10 @@ const sortedGroups = computed(() => {
       case 'strategy':
         cmp = a.strategy.localeCompare(b.strategy)
         break
-      case 'best_roe': {
-        const av = Number.isFinite(a.best_roe) ? a.best_roe : -Infinity
-        const bv = Number.isFinite(b.best_roe) ? b.best_roe : -Infinity
+      case 'total_roe': {
+        // 无 roe 的组排在最后，而不是被 NaN 比较搅乱顺序
+        const av = Number.isFinite(a.total_roe) ? a.total_roe : -Infinity
+        const bv = Number.isFinite(b.total_roe) ? b.total_roe : -Infinity
         cmp = av - bv
         break
       }
@@ -242,6 +248,27 @@ function fmtPct(v: number): string {
 function pctClass(v: number): string {
   if (!Number.isFinite(v)) return ''
   return v > 0 ? 'val-positive' : v < 0 ? 'val-negative' : ''
+}
+
+/**
+ * 合计值的悬停明细：`BTC +12.30% / ETH -3.10%`。
+ *
+ * 求和把各标的抹平成一个数，用户想追问"哪个标的拖了后腿"时
+ * 不必先点「更多」进标的层--悬停即可看到构成。
+ */
+function roeBreakdown(g: BacktestGroupRow): string {
+  const parts = g.token_entries
+    .map(e => ({ symbol: e.symbol, roe: e.metrics?.roe }))
+    .filter((x): x is { symbol: string; roe: number } => Number.isFinite(x.roe))
+    .sort((a, b) => b.roe - a.roe)
+    .map(x => `${formatSymbol(x.symbol)} ${fmtSigned(x.roe)}`)
+  return parts.length ? parts.join('  /  ') : ''
+}
+
+/** 带正负号的百分比，用于明细中一眼区分盈亏 */
+function fmtSigned(v: number): string {
+  const pct = (v * 100).toFixed(2)
+  return v > 0 ? `+${pct}%` : `${pct}%`
 }
 
 function goTokenList(g: BacktestGroupRow) {
