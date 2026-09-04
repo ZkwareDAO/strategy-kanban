@@ -189,13 +189,16 @@ export interface BacktestGroupRow {
   /** 组内最佳 ROE（取所有标的 roe 的最大值） */
   best_roe: number
   /**
-   * 组内总计 ROE（所有标的 roe 之和）。
+   * 组内平均 ROE（所有标的 roe 的算术平均）。
    *
-   * 直接相加的前提是各标的用同一套 cash/leverage 参数（当前回测脚本即如此），
-   * 此时等权求和才等于整组资金的收益率。
+   * 各标的用同一套 cash/leverage 独立回测，N 个标的占用的总资金是 N 份本金，
+   * 故整组收益率 = Σ(roe_i × C) / (N × C) = mean(roe_i)。
+   * 求和会把收益率放大 N 倍，且让标的多的策略在排序中虚高，不可跨行比较。
+   *
+   * 分母只数有 roe 的标的--缺数据不等于该标的收益为 0。
    * 无任何标的带 roe 时为 NaN--0 会被误读成"打平"。
    */
-  total_roe: number
+  avg_roe: number
   /** 回测区间开始日期 */
   start_date: string
   /** 回测区间结束日期 */

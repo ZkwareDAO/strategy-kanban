@@ -99,6 +99,9 @@ export function groupRuns(
   options: { includeEmpty?: boolean } = {},
 ): BacktestGroupRow[] {
   const map = new Map<string, BacktestGroupRow>()
+  // roe 的和与个数单独存：avg_roe 要等整组遍历完才算得出来，
+  // 把中间量挂在行对象上会污染对外的数据结构
+  const roeAcc = new Map<string, { sum: number; count: number }>()
 
   for (const entry of entries) {
     // 空回测默认不展示
@@ -116,7 +119,7 @@ export function groupRuns(
         strategy: entry.strategy,
         symbols: [],
         best_roe: -Infinity,
-        total_roe: NaN,
+        avg_roe: NaN,
         start_date: startDate,
         end_date: endDate,
         date: entry.date,
@@ -125,6 +128,7 @@ export function groupRuns(
         token_entries: [],
       }
       map.set(key, row)
+      roeAcc.set(key, { sum: 0, count: 0 })
     }
 
     row.symbols.push(entry.symbol)
@@ -133,16 +137,22 @@ export function groupRuns(
     const roe = entry.metrics?.roe
     if (typeof roe === 'number' && Number.isFinite(roe)) {
       row.best_roe = Math.max(row.best_roe, roe)
-      // 从 NaN 起步、首个有效值直接赋值：区分"整组无 roe"与"合计恰好为 0"
-      row.total_roe = Number.isFinite(row.total_roe) ? row.total_roe + roe : roe
+      const acc = roeAcc.get(key)
+      if (acc) {
+        acc.sum += roe
+        acc.count += 1
+      }
     }
 
     const completedAt = completedKey(entry)
     if (completedAt > row.completed_at) row.completed_at = completedAt
   }
 
-  for (const row of map.values()) {
+  for (const [key, row] of map) {
     row.symbols.sort()
+    const acc = roeAcc.get(key)
+    // count 为 0 时保持 NaN：0/0 与"整组平均恰好为 0"必须能区分
+    if (acc && acc.count > 0) row.avg_roe = acc.sum / acc.count
   }
 
   return Array.from(map.values()).sort((a, b) => b.completed_at.localeCompare(a.completed_at))
