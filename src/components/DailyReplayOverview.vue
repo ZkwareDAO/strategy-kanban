@@ -44,6 +44,9 @@
             <th class="sortable" :title="AVG_ROE_HINT" @click="toggleSort('avg_roe')">
               平均 ROE <span class="sort-arrow">{{ sortArrow('avg_roe') }}</span>
             </th>
+            <th class="sortable" :title="BEST_ROE_HINT" @click="toggleSort('best_roe')">
+              最佳 ROE <span class="sort-arrow">{{ sortArrow('best_roe') }}</span>
+            </th>
             <th class="sortable" @click="toggleSort('signals')">
               信号数 <span class="sort-arrow">{{ sortArrow('signals') }}</span>
             </th>
@@ -63,6 +66,9 @@
             </td>
             <td :class="pctClass(g.avg_roe)" :title="roeBreakdown(g)">
               {{ fmtPct(g.avg_roe) }}
+            </td>
+            <td :class="pctClass(g.best_roe)" :title="bestRoeSymbol(g)">
+              {{ fmtPct(g.best_roe) }}
             </td>
             <td :class="{ 'val-muted': signalCount(g) === 0 }">{{ signalCount(g) }}</td>
             <td class="col-time">{{ formatCompletedAt(g.completed_at) }}</td>
@@ -110,6 +116,8 @@ const EMPTY_SWITCH_HINT =
 const AVG_ROE_HINT =
   '该策略当天各标的 ROE 的算术平均。各标的本金与杠杆一致、独立回测，故整组收益率等于平均值而非求和。鼠标悬停单元格可看各标的明细'
 
+const BEST_ROE_HINT = '该策略当天表现最好的单个标的 ROE。鼠标悬停单元格可看是哪个标的'
+
 const loading = ref(false)
 const entries = ref<BacktestOutputEntry[]>([])
 const selectedStrategy = ref('')
@@ -119,8 +127,8 @@ const includeEmpty = ref(false)
 // 与「每日收益」共享 store 里的日期：两个 tab 间来回切换不必重新选一次
 const selectedDate = ref(appStore.date || compactDaysAgo(1))
 
-type SortKey = 'strategy' | 'avg_roe' | 'signals' | 'completed_at'
-// 默认按平均 ROE 倒序：一天之内完成时间都挨在一起，按表现排更有信息量
+type SortKey = 'strategy' | 'avg_roe' | 'best_roe' | 'signals' | 'completed_at'
+// 默认按平均 ROE 倒序：一天之内完成时间都挨在一起，按整组表现排更有信息量
 const sortKey = ref<SortKey>('avg_roe')
 const sortAsc = ref(false)
 
@@ -160,11 +168,11 @@ const sortedGroups = computed(() => {
       case 'strategy':
         cmp = a.strategy.localeCompare(b.strategy)
         break
-      case 'avg_roe': {
-        // 无 roe 的组排在最后，而不是被 NaN 比较搅乱顺序
-        const av = Number.isFinite(a.avg_roe) ? a.avg_roe : -Infinity
-        const bv = Number.isFinite(b.avg_roe) ? b.avg_roe : -Infinity
-        cmp = av - bv
+      case 'avg_roe':
+      case 'best_roe': {
+        // 无 roe 的组排在最后：avg_roe 缺值是 NaN、best_roe 是 -Infinity，
+        // 都归一成 -Infinity，避免 NaN 参与比较搅乱顺序
+        cmp = roeSortValue(a, sortKey.value) - roeSortValue(b, sortKey.value)
         break
       }
       case 'signals':
@@ -263,6 +271,22 @@ function roeBreakdown(g: BacktestGroupRow): string {
     .sort((a, b) => b.roe - a.roe)
     .map(x => `${formatSymbol(x.symbol)} ${fmtSigned(x.roe)}`)
   return parts.length ? parts.join('  /  ') : ''
+}
+
+/** 最佳 ROE 的悬停明细：ROE 最高的那个标的+收益率 */
+function bestRoeSymbol(g: BacktestGroupRow): string {
+  if (!Number.isFinite(g.best_roe)) return ''
+  const best = g.token_entries
+    .map(e => ({ symbol: e.symbol, roe: e.metrics?.roe }))
+    .filter((x): x is { symbol: string; roe: number } => Number.isFinite(x.roe))
+    .sort((a, b) => b.roe - a.roe)[0]
+  return best ? `${formatSymbol(best.symbol)} ${fmtSigned(best.roe)}` : ''
+}
+
+/** 排序用归一化值：NaN / -Infinity 都收拢到 -Infinity，保证排在最后 */
+function roeSortValue(g: BacktestGroupRow, key: 'avg_roe' | 'best_roe'): number {
+  const v = g[key]
+  return Number.isFinite(v) ? v : -Infinity
 }
 
 /** 带正负号的百分比，用于明细中一眼区分盈亏 */
