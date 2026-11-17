@@ -6,14 +6,28 @@
  */
 import { describe, it, expect } from 'vitest'
 import { splitRealizedAndOpen, isFuturesPosition } from './positionSplit'
-import { dedupePositions } from './modeFilter'
 import type { OrderPosition } from '@/models/performance'
+
+/** 测试用去重：与 service 的 id + CLOSED 优先口径一致 */
+function dedupePositions(positions: OrderPosition[]): OrderPosition[] {
+  const byKey = new Map<string, OrderPosition>()
+  for (const position of positions) {
+    const key = position.id
+      ? `id|${position.id}`
+      : `${position.strategy_name}|${position.asset}|${position.created_at}`
+    const previous = byKey.get(key)
+    if (!previous || (previous.deleted !== 1 && position.deleted === 1)) {
+      byKey.set(key, position)
+    }
+  }
+  return [...byKey.values()]
+}
 
 /** 构造一条仓位，只覆盖测试关心的字段 */
 function pos(over: Partial<OrderPosition> = {}): OrderPosition {
   return {
     asset: 'BTCUSDT',
-    strategy_name: 'NEWOBV_4H_1_BTCUSDT',
+    strategy_name: 'DEMO_VOLUME_4H_1_BTCUSDT',
     pos_type: 2,
     pnl_value: 1,
     deleted: 1,
@@ -96,7 +110,7 @@ describe('splitRealizedAndOpen', () => {
 describe('与 dedupePositions 的调用顺序', () => {
   /** 同一笔仓位的两天快照：0811 持仓中（浮盈），0812 平仓（实亏，方向反转） */
   const openSnapshot = pos({
-    strategy_name: 'SAR_SNT3_V3_8H_3_XRPUSDC',
+    strategy_name: 'DEMO_SCORE_8H_3_XRPUSDC',
     asset: 'XRPUSDC',
     created_at: '2026-08-11T03:00:00Z',
     deleted: 0,
@@ -104,7 +118,7 @@ describe('与 dedupePositions 的调用顺序', () => {
     pnl_value: 0.1073,
   })
   const closedSnapshot = pos({
-    strategy_name: 'SAR_SNT3_V3_8H_3_XRPUSDC',
+    strategy_name: 'DEMO_SCORE_8H_3_XRPUSDC',
     asset: 'XRPUSDC',
     created_at: '2026-08-11T03:00:00Z',
     deleted: 1,

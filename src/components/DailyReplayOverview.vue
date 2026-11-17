@@ -97,12 +97,16 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
-import { getReplayIndex, clearReplayIndexCache } from '@/api/backtest'
-import { groupRuns } from '@/utils/backtestIndex'
+import {
+  groupBacktestRuns,
+  loadBacktestRuns,
+  type BacktestRunGroupRow,
+} from '@/services/backtestRuns'
+import { getLatestCatalogDay } from '@/services/catalog'
 import { formatSymbol } from '@/utils/display'
 import { compactDaysAgo } from '@/utils/compactDate'
 import DateStepper from '@/components/common/DateStepper.vue'
-import type { BacktestOutputEntry, BacktestGroupRow } from '@/models/backtest'
+import type { BacktestRunRow } from '@/models/dataset'
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -119,7 +123,7 @@ const AVG_ROE_HINT =
 const BEST_ROE_HINT = '该策略当天表现最好的单个标的 ROE。鼠标悬停单元格可看是哪个标的'
 
 const loading = ref(false)
-const entries = ref<BacktestOutputEntry[]>([])
+const runRows = ref<BacktestRunRow[]>([])
 const selectedStrategy = ref('')
 const currentPage = ref(1)
 /** 是否展示当天"跑了但没出信号"的策略 */
@@ -133,8 +137,8 @@ const sortKey = ref<SortKey>('avg_roe')
 const sortAsc = ref(false)
 
 // 分组逻辑与策略发现完全一致（同构数据源），仅空回测的取舍交给开关
-const groups = computed<BacktestGroupRow[]>(() =>
-  groupRuns(entries.value, { includeEmpty: includeEmpty.value }),
+const groups = computed<BacktestRunGroupRow[]>(() =>
+  groupBacktestRuns(runRows.value, { includeEmpty: includeEmpty.value }),
 )
 
 const availableStrategies = computed(() => {
@@ -150,7 +154,7 @@ const availableStrategies = computed(() => {
  */
 const hiddenEmptyCount = computed(() => {
   if (includeEmpty.value) return 0
-  return groupRuns(entries.value, { includeEmpty: true }).length - groups.value.length
+  return groupBacktestRuns(runRows.value, { includeEmpty: true }).length - groups.value.length
 })
 
 const filteredGroups = computed(() => {
@@ -210,14 +214,14 @@ watch(pageCount, count => {
 })
 
 // 切换日期后，原策略筛选可能在新的一天不存在，会导致表格空白且看不出原因
-watch(entries, () => {
+watch(runRows, () => {
   if (selectedStrategy.value && !availableStrategies.value.includes(selectedStrategy.value)) {
     selectedStrategy.value = ''
   }
 })
 
 /** 组内信号总数：直观体现"当天这个策略有没有动作" */
-function signalCount(g: BacktestGroupRow): number {
+function signalCount(g: BacktestRunGroupRow): number {
   return g.token_entries.reduce((sum, e) => sum + (e.signals_processed ?? 0), 0)
 }
 
@@ -236,8 +240,8 @@ function sortArrow(key: SortKey): string {
   return sortAsc.value ? '▲' : '▼'
 }
 
-function groupKey(g: BacktestGroupRow): string {
-  return `${g.strategy}|${g.date}|${g.sweep}`
+function groupKey(g: BacktestRunGroupRow): string {
+  return `${g.strategy}|${g.batch_id}`
 }
 
 function formatCompletedAt(ts: string): string {
@@ -264,7 +268,7 @@ function pctClass(v: number): string {
  * 平均把各标的抹平成一个数，用户想追问"哪个标的拖了后腿"时
  * 不必先点「更多」进标的层--悬停即可看到构成。
  */
-function roeBreakdown(g: BacktestGroupRow): string {
+function roeBreakdown(g: BacktestRunGroupRow): string {
   const parts = g.token_entries
     .map(e => ({ symbol: e.symbol, roe: e.metrics?.roe }))
     .filter((x): x is { symbol: string; roe: number } => Number.isFinite(x.roe))
@@ -274,7 +278,7 @@ function roeBreakdown(g: BacktestGroupRow): string {
 }
 
 /** 最佳 ROE 的悬停明细：ROE 最高的那个标的+收益率 */
-function bestRoeSymbol(g: BacktestGroupRow): string {
+function bestRoeSymbol(g: BacktestRunGroupRow): string {
   if (!Number.isFinite(g.best_roe)) return ''
   const best = g.token_entries
     .map(e => ({ symbol: e.symbol, roe: e.metrics?.roe }))
@@ -284,7 +288,7 @@ function bestRoeSymbol(g: BacktestGroupRow): string {
 }
 
 /** 排序用归一化值：NaN / -Infinity 都收拢到 -Infinity，保证排在最后 */
-function roeSortValue(g: BacktestGroupRow, key: 'avg_roe' | 'best_roe'): number {
+function roeSortValue(g: BacktestRunGroupRow, key: 'avg_roe' | 'best_roe'): number {
   const v = g[key]
   return Number.isFinite(v) ? v : -Infinity
 }
@@ -295,15 +299,13 @@ function fmtSigned(v: number): string {
   return v > 0 ? `+${pct}%` : `${pct}%`
 }
 
-function goTokenList(g: BacktestGroupRow) {
+function goTokenList(g: BacktestRunGroupRow) {
   router.push({
     name: 'ReplayTokenList',
     query: {
-      // day 是数据所属日期（目录名），date 是回测运行日期--跨零点时二者不同
-      day: selectedDate.value,
+      day: g.day || selectedDate.value,
       strategy: g.strategy,
-      date: g.date,
-      sweep: String(g.sweep),
+      batch: g.batch_id,
     },
   })
 }
@@ -317,25 +319,32 @@ async function handleDateChange(date: string) {
 async function loadRows() {
   loading.value = true
   try {
-    entries.value = await getReplayIndex(selectedDate.value)
+    runRows.value = await loadBacktestRuns(
+      [
+        {
+          day: selectedDate.value,
+          strategies: [],
+          hasLive: false,
+          hasBacktest: true,
+          updatedAt: '',
+        },
+      ],
+      { source: 'replay' },
+    )
   } finally {
     loading.value = false
   }
 }
 
 onMounted(async () => {
-  // 首次进入时把默认日期同步进 store，使切到「每日收益」时日期一致
-  if (!appStore.date) appStore.setDate(selectedDate.value)
+  // 首次进入时把默认日期同步进 store；优先取 catalog 最新一天
+  if (!appStore.date) {
+    const latest = await getLatestCatalogDay()
+    if (latest) selectedDate.value = latest.compact
+    appStore.setDate(selectedDate.value)
+  }
   await loadRows()
 })
-
-// dev 期间监听 vite 插件推送的索引更新事件，自动重新加载
-if (import.meta.hot) {
-  import.meta.hot.on('replay-index-updated', () => {
-    clearReplayIndexCache()
-    loadRows()
-  })
-}
 </script>
 
 <style scoped lang="scss">

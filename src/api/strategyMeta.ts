@@ -78,11 +78,16 @@ export function loadStrategyMeta(): Promise<void> {
   return inflight
 }
 
+/** 注册/覆盖单个策略的元数据（v2 从 {day}/{strategy}/meta.json 读取后调用） */
+export function setStrategyMeta(strategyDir: string, meta: StrategyMeta): void {
+  strategyMeta.value = { ...strategyMeta.value, [strategyDir]: meta }
+}
+
 /**
  * 按策略目录名查找元数据。
  *
  * 除精确匹配外，还尝试「去下划线转大写」的归一化形式
- * （如 `obv_atr_v2` → `OBVATRV2`），兼容以缩写为键的配置。
+ * （如 `demo_volatility` → `DEMOVOLATILITY`），兼容以缩写为键的配置。
  */
 export function getStrategyMeta(strategyDir: string): StrategyMeta | null {
   if (!strategyDir) return null

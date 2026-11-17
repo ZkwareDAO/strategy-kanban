@@ -71,9 +71,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getReplayIndex } from '@/api/backtest'
+import { dataRepository } from '@/data'
 import { formatSymbol } from '@/utils/display'
-import type { BacktestOutputEntry } from '@/models/backtest'
+import type { BacktestRunRow } from '@/models/dataset'
 
 const route = useRoute()
 const router = useRouter()
@@ -81,9 +81,8 @@ const router = useRouter()
 /** 数据所属日期（目录名）--与回测运行日期 date 跨零点时不同 */
 const day = (route.query.day as string) ?? ''
 const strategy = (route.query.strategy as string) ?? ''
-// 定位到具体这一次回测：同一天同一策略可能跑过多轮
-const runDate = (route.query.date as string) ?? ''
-const runSweep = (route.query.sweep as string) ?? ''
+// 定位到具体批次：同一天同一策略可能跑过多批回测
+const batch = (route.query.batch as string) ?? ''
 
 interface TokenRow {
   symbol: string
@@ -95,7 +94,7 @@ interface TokenRow {
   total_trades: number | null
   signals_processed: number | null
   sharpe_ratio: number | null
-  entry: BacktestOutputEntry
+  entry: BacktestRunRow
 }
 
 const loading = ref(true)
@@ -125,25 +124,23 @@ async function fetchData() {
   loading.value = true
   error.value = ''
   try {
-    const entries = await getReplayIndex(day)
-    // 精确定位到某一轮回测；缺省（手改链接）时退化为该策略当天全部
-    const matched = entries.filter(e => {
-      if (e.strategy !== strategy) return false
-      if (runDate && e.date !== runDate) return false
-      if (runSweep && String(e.sweep ?? 0) !== runSweep) return false
-      return true
-    })
-    tokenRows.value = matched.map(entry => ({
-      symbol: entry.symbol,
-      roe: entry.metrics?.roe ?? null,
-      annualized_return: entry.metrics?.annualized_return ?? null,
-      total_return: entry.metrics?.total_return ?? null,
-      max_drawdown: entry.metrics?.max_drawdown ?? null,
-      win_rate: entry.metrics?.win_rate ?? null,
-      total_trades: entry.metrics?.total_trades ?? null,
-      signals_processed: entry.signals_processed ?? null,
-      sharpe_ratio: entry.metrics?.sharpe_ratio ?? null,
-      entry,
+    const rows = await dataRepository.getDayRuns(day, { source: 'replay' })
+    // 精确定位到某一批次；缺省（手改链接）时退化为该策略当天全部
+    const matched = rows.filter(
+      (row) =>
+        row.strategy === strategy && (!batch || row.batchId === batch),
+    )
+    tokenRows.value = matched.map(row => ({
+      symbol: row.symbol,
+      roe: row.roe,
+      annualized_return: row.annualizedReturn,
+      total_return: row.totalReturn,
+      max_drawdown: row.maxDrawdown,
+      win_rate: row.winRate,
+      total_trades: row.totalTrades,
+      signals_processed: row.signalsProcessed,
+      sharpe_ratio: row.sharpeRatio,
+      entry: row,
     }))
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败'
@@ -212,11 +209,9 @@ function goDetail(row: TokenRow) {
   router.push({
     name: 'BacktestDetail',
     params: { strategy: row.entry.strategy, symbol: row.entry.symbol },
-    // source=replay 让详情页改从 /data 读取，而非策略发现的 /backtest-output
     query: {
-      date: row.entry.date,
-      time: row.entry.time,
-      path: row.entry.path,
+      day: row.entry.day,
+      runStamp: row.entry.runStamp,
       source: 'replay',
     },
   })

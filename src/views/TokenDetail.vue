@@ -25,15 +25,9 @@
           </div>
           <div v-show="logicExpanded" class="logic-content-inline">
             <div class="logic-section-inline">
-              <div class="logic-title-inline">【开仓条件】</div>
+              <div class="logic-title-inline">【开仓】</div>
               <ul>
                 <li v-for="(rule, idx) in strategyLogic.entry_conditions.rules" :key="idx">{{ rule }}</li>
-              </ul>
-            </div>
-            <div class="logic-section-inline">
-              <div class="logic-title-inline">【平仓条件】</div>
-              <ul>
-                <li v-for="(rule, idx) in strategyLogic.exit_conditions.rules" :key="idx">{{ rule }}</li>
               </ul>
             </div>
             <div class="logic-section-inline">

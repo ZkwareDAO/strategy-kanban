@@ -7,7 +7,7 @@
  * 服务端不支持 Range 时降级为整文件流式过滤（[[streamFilterByDateRange]]）。
  */
 import type { RawKlinePoint } from '@/models/klineV2'
-import { parseKlineRaw, filterKlineByDateRange } from '@/utils/klineV2'
+import { parseKlineLine, parseKlineRaw, filterKlineByDateRange } from '@/utils/klineV2'
 
 /** HTTP Range 读取回调（start/end 均为含端点的字节偏移） */
 export type RangeFetcher = (start: number, end: number) => Promise<string>
@@ -188,29 +188,89 @@ export interface RangeProbe {
   fileSize: number
 }
 
-/**
- * 探测 URL 是否支持 HTTP Range，并获取文件大小
- * 通过 `Range: bytes=0-0` 请求，206 + content-range 即支持
- */
-export async function probeRange(url: string): Promise<RangeProbe> {
-  const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' } })
-  if (res.status === 206) {
-    const cr = res.headers.get('content-range') ?? ''
-    const m = /\/(\d+)/.exec(cr)
-    return { supported: true, fileSize: m ? Number(m[1]) : 0 }
-  }
-  return { supported: false, fileSize: 0 }
+const probeCache = new Map<string, Promise<RangeProbe>>()
+
+/** 清空 probe 缓存（测试或数据源切换时使用） */
+export function clearProbeCache(): void {
+  probeCache.clear()
 }
 
 /**
- * 降级路径：整文件拉取后按日期过滤（服务端不支持 Range 时使用）
+ * 探测 URL 是否支持 HTTP Range，并获取文件大小。
+ * 结果按 URL 缓存：同一文件在一次会话中只探测一次。
+ */
+export async function probeRange(
+  url: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): Promise<RangeProbe> {
+  const cached = probeCache.get(url)
+  if (cached) return cached
+
+  const request = (async (): Promise<RangeProbe> => {
+    try {
+      const res = await fetchImpl(url, { method: 'GET', headers: { Range: 'bytes=0-0' } })
+      if (res.status === 206) {
+        const cr = res.headers.get('content-range') ?? ''
+        const m = /\/(\d+)/.exec(cr)
+        return { supported: true, fileSize: m ? Number(m[1]) : 0 }
+      }
+    } catch {
+      // 网络失败按不支持 Range 处理，走流式降级
+    }
+    return { supported: false, fileSize: 0 }
+  })()
+
+  probeCache.set(url, request)
+  return request
+}
+
+/**
+ * 降级路径：服务端不支持 Range 时流式读取，按日期过滤。
+ *
+ * 数据按时间升序，读到超过 endDate 的行即可停止，不必把整文件拉进内存。
  */
 export async function streamFilterByDateRange(
   url: string,
   startDate: string,
   endDate: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<RawKlinePoint[]> {
-  const res = await fetch(url)
-  const text = await res.text()
-  return filterKlineByDateRange(parseKlineRaw(text), startDate, endDate)
+  const res = await fetchImpl(url)
+  // 测试桩可能只提供 text()/body，没有 ok 字段；仅在明确失败时返回空
+  if (res.ok === false) return []
+
+  const result: RawKlinePoint[] = []
+  const processLine = (line: string): boolean => {
+    const point = parseKlineLine(line)
+    if (!point) return false
+    const date = point.datetime.slice(0, 10)
+    if (date > endDate) return true
+    if (date >= startDate) result.push(point)
+    return false
+  }
+
+  if (!res.body) {
+    return filterKlineByDateRange(parseKlineRaw(await res.text()), startDate, endDate)
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let stopped = false
+  while (!stopped) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let newline = buffer.indexOf('\n')
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline)
+      buffer = buffer.slice(newline + 1)
+      stopped = processLine(line)
+      if (stopped) break
+      newline = buffer.indexOf('\n')
+    }
+  }
+  if (!stopped && buffer.length > 0) processLine(buffer)
+  await reader.cancel().catch(() => undefined)
+  return result
 }

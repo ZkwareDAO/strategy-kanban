@@ -65,10 +65,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getBacktestIndex } from '@/api/backtest'
-import { pickLatestPerSymbol } from '@/utils/backtestIndex'
+import { dataRepository } from '@/data'
+import { loadBacktestRuns } from '@/services/backtestRuns'
 import { formatSymbol } from '@/utils/display'
-import type { BacktestOutputEntry } from '@/models/backtest'
+import type { BacktestRunRow } from '@/models/dataset'
 
 const route = useRoute()
 const router = useRouter()
@@ -76,9 +76,10 @@ const router = useRouter()
 const strategy = (route.query.strategy as string) ?? ''
 const startDate = (route.query.start_date as string) ?? ''
 const endDate = (route.query.end_date as string) ?? ''
-// 定位到具体这一次历史回测：同一策略/区间可能跑过多次
-const runDate = (route.query.date as string) ?? ''
-const runSweep = (route.query.sweep as string) ?? ''
+const day = (route.query.day as string) ?? ''
+// 定位到具体批次：同一策略/区间可能跑过多次
+const batch = (route.query.batch as string) ?? ''
+const source = (route.query.source as string) ?? ''
 
 interface TokenRow {
   symbol: string
@@ -89,7 +90,7 @@ interface TokenRow {
   win_rate: number | null
   total_trades: number | null
   sharpe_ratio: number | null
-  entry: BacktestOutputEntry
+  entry: BacktestRunRow
 }
 
 const loading = ref(true)
@@ -117,33 +118,45 @@ async function fetchData() {
   loading.value = true
   error.value = ''
   try {
-    // 索引已内嵌展示所需指标，无需逐个拉取 backtest_result.json
-    const entries = await getBacktestIndex()
-    const inInterval = entries.filter(e => {
-      if (e.strategy !== strategy) return false
-      if ((e.start_date ?? '?') !== startDate || (e.end_date ?? '?') !== endDate) return false
-      return e.signals_processed !== 0
-    })
-    // 有 date/sweep 时精确定位到某一次历史回测；
-    // 缺省（旧链接）时退化为按区间匹配，并对每个标的只保留最新一次，避免重复成行
-    const hasRunParams = Boolean(runDate || runSweep)
-    const matched = hasRunParams
-      ? inInterval.filter(e => {
-          if (runDate && e.date !== runDate) return false
-          if (runSweep && String(e.sweep ?? 0) !== runSweep) return false
-          return true
-        })
-      : pickLatestPerSymbol(inInterval)
-    tokenRows.value = matched.map(entry => ({
-      symbol: entry.symbol,
-      annualized_return: entry.metrics?.annualized_return ?? null,
-      roe: entry.metrics?.roe ?? null,
-      total_return: entry.metrics?.total_return ?? null,
-      max_drawdown: entry.metrics?.max_drawdown ?? null,
-      win_rate: entry.metrics?.win_rate ?? null,
-      total_trades: entry.metrics?.total_trades ?? null,
-      sharpe_ratio: entry.metrics?.sharpe_ratio ?? null,
-      entry,
+    // discovery 走全局索引；replay/旧链接按天读取
+    let rows: BacktestRunRow[]
+    if (source === 'discovery' || !day) {
+      const discovery = await dataRepository.getDiscoveryRuns()
+      rows = discovery.length
+        ? discovery
+        : await loadBacktestRuns(await dataRepository.getCatalog(), { source: 'discovery' })
+    } else {
+      rows = await dataRepository.getDayRuns(day, { source: 'discovery' })
+    }
+
+    let matched = rows.filter(row => row.strategy === strategy && row.signalsProcessed !== 0)
+    if (batch) {
+      matched = matched.filter(row => row.batchId === batch)
+    } else {
+      // 旧链接：按区间匹配，并对每个标的只保留最新一次，避免重复成行
+      matched = matched.filter(
+        (row) =>
+          (!startDate || row.startDate === startDate) &&
+          (!endDate || row.endDate === endDate),
+      )
+      const latest = new Map<string, BacktestRunRow>()
+      for (const row of matched) {
+        const previous = latest.get(row.symbol)
+        if (!previous || row.completedAt > previous.completedAt) latest.set(row.symbol, row)
+      }
+      matched = [...latest.values()]
+    }
+
+    tokenRows.value = matched.map(row => ({
+      symbol: row.symbol,
+      annualized_return: row.annualizedReturn,
+      roe: row.roe,
+      total_return: row.totalReturn,
+      max_drawdown: row.maxDrawdown,
+      win_rate: row.winRate,
+      total_trades: row.totalTrades,
+      sharpe_ratio: row.sharpeRatio,
+      entry: row,
     }))
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败'
@@ -207,7 +220,11 @@ function goDetail(row: TokenRow) {
   router.push({
     name: 'BacktestDetail',
     params: { strategy: row.entry.strategy, symbol: row.entry.symbol },
-    query: { date: row.entry.date, time: row.entry.time, path: row.entry.path },
+    query: {
+      day: row.entry.day,
+      runStamp: row.entry.runStamp,
+      source: 'discovery',
+    },
   })
 }
 

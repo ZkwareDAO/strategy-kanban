@@ -74,8 +74,15 @@ export interface BacktestAccount {
   trade_count?: number
 }
 
+/** 日权益数据点（v2 结果 JSON 的 daily_equity） */
+export interface DailyEquityPoint {
+  date: string
+  equity: number
+  cash: number
+}
+
 /**
- * 回测结果（backtest_result.json 顶层结构）
+ * 回测结果（{runStamp}/{SYMBOL}.json 顶层结构）
  */
 export interface BacktestResult {
   config?: {
@@ -90,6 +97,8 @@ export interface BacktestResult {
   duration_seconds?: number
   accounts?: BacktestAccount[]
   metrics?: BacktestMetrics
+  /** 权益曲线：v2 不再提供 backtest_equity.csv，统一放在结果 JSON */
+  daily_equity?: DailyEquityPoint[]
   trades_count?: number
   signals_processed?: number
   klines_processed?: number
@@ -120,7 +129,7 @@ export interface BacktestSummaryMetrics {
  * 保留全部历史 run--同一 (策略, 标的) 的多次回测各占一条。
  */
 export interface BacktestOutputEntry {
-  /** 策略目录名，如 cta_ict_v3 */
+  /** 策略目录名，如 demo_trend */
   strategy: string
   /** 标的，如 BTCUSDT */
   symbol: string
@@ -128,7 +137,7 @@ export interface BacktestOutputEntry {
   date: string
   /** 回测运行时间 HHMMSS（目录名） */
   time: string
-  /** 相对 backtest-output 的路径，如 cta_ict_v3/20260629/101907/BTCUSDT */
+  /** 相对 backtest-output 的路径，如 demo_trend/20260629/101907/BTCUSDT */
   path: string
   /**
    * 同日轮次（从 0 开始）：区分同一天内对同一标的的重跑。
@@ -150,31 +159,6 @@ export interface BacktestOutputEntry {
 }
 
 /**
- * 回测索引文件结构（public/backtest-output-index.json）
- */
-export interface BacktestOutputIndex {
-  /** 生成时间 ISO */
-  generated_at: string
-  entries: BacktestOutputEntry[]
-}
-
-/**
- * 每日回放索引文件结构（public/replay-index.json）
- *
- * 与 BacktestOutputIndex 的区别是**按日期分桶**：每日回放页一次只展示一天，
- * 平铺成单个 entries 数组会让前端每次切换日期都要在全量条目里过滤。
- *
- * key 为紧凑日期 YYYYMMDD（数据源的目录名），value 为该日的索引条目。
- * 注意条目里的 `date` 是**回测运行日期**，跨零点运行时会比 key 大一天，
- * 两者不可互相推导。
- */
-export interface ReplayIndex {
-  /** 生成时间 ISO */
-  generated_at: string
-  days: Record<string, BacktestOutputEntry[]>
-}
-
-/**
  * 策略发现页的策略层级分组行。
  *
  * 分组键 = `${strategy}|${start_date}|${end_date}|${date}|${sweep}`：
@@ -182,7 +166,7 @@ export interface ReplayIndex {
  * 从而保留全部历史记录。
  */
 export interface BacktestGroupRow {
-  /** 策略目录名，如 obv_atr_v2 */
+  /** 策略目录名，如 demo_volatility */
   strategy: string
   /** 该组下所有标的（展示时用 `|` 连接） */
   symbols: string[]

@@ -94,3 +94,18 @@ export interface Signal {
 export interface MatchedSignal extends Signal {
   match_type: string
 }
+
+/** 图表信号点（v2 signal CSV → 蜡烛图标记） */
+export interface ChartSignalPoint {
+  /** 信号时间，格式 YYYY-MM-DD HH:MM:SS */
+  time: string
+  price: number
+  side: 'BUY' | 'SELL'
+  action: 'open' | 'close'
+  direction: 'long' | 'short'
+  source: 'live' | 'backtest'
+  /** 触发原因（含指标证据），如 SAR=1(...) ST=1(...) */
+  reason: string
+  /** 对比状态：matched / missed / unmatched */
+  status?: string
+}

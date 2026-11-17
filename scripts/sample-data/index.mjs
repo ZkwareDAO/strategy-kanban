@@ -2,7 +2,7 @@
 /**
  * 示例数据生成器（开源演示用）
  *
- * 生成一整套符合 docs/DATA-SPEC.md 的**虚拟**数据，让新克隆的用户无需接入
+ * 生成一套符合 frontend-data v2 契约的**虚拟**数据，让新克隆的用户无需接入
  * 任何真实数据源即可 `npm run dev` 看到完整页面效果。
  *
  * ## 为什么是脚本而非提交静态文件
@@ -12,7 +12,6 @@
  *   - 区间统计默认上周一至今天（src/components/PerformanceOverview.vue）
  *   - 详情页默认今天（src/views/TokenDetailV2.vue）
  * 固定日期的静态数据过几周就会全部落在窗口之外，用户打开仍是空页面。
- * 脚本每次以运行当天倒推日期，因此永远命中默认值。
  *
  * ## 数据全部为程序合成
  *
@@ -24,27 +23,13 @@
  *   node scripts/sample-data/index.mjs --no-link  # 只生成，不碰 public/
  */
 import { resolve, join } from 'node:path'
-import { SYMBOLS, generateSymbolMarket, formatCompactDate, startOfUtcDay } from './market.mjs'
-import { STRATEGIES, buildManifest, buildStrategyMeta } from './strategies.mjs'
-import {
-  simulateTrades,
-  buildDailyPositions,
-  buildBacktestTrades,
-  buildComparison,
-  buildPerformanceRows,
-  performanceRowsToCsv,
-} from './trades.mjs'
-import { planBacktestRuns, buildBacktestRun } from './backtest.mjs'
-import { planReplayData } from './replay.mjs'
-import { writeText, writeJson, ensureDir, removeDir, linkDir, LinkResult } from './fsx.mjs'
+import { SYMBOLS, generateSymbolMarket, startOfUtcDay } from './market.mjs'
+import { STRATEGIES } from './strategies.mjs'
+import { writeText, ensureDir, removeDir, linkDir, LinkResult } from './fsx.mjs'
+import { writeFrontendDataV2 } from './frontendV2.mjs'
 
 const MS_PER_DAY = 86400000
-/**
- * 默认生成天数。
- *
- * 21 天是为覆盖区间统计的最坏情况：其默认起点是「上周一」，当天为周日时
- * 距今 13 天，再留出余量。
- */
+/** 默认 21 天：覆盖区间统计「上周一 ~ 今天」的最坏情况 */
 const DEFAULT_DAYS = 21
 
 /** 解析命令行参数 */
@@ -79,136 +64,15 @@ const HELP = `示例数据生成器
   --no-link    只写入 sample-data/，不建立 public/ 符号链接
   -h, --help   显示本帮助
 
-产物写入 sample-data/，并链接到 public/frontend-data、public/kline-data、
-public/backtest-output、public/data。已存在的真实目录或指向别处的软链不会被覆盖。
+产物写入 sample-data/frontend-data（v2 布局）与 sample-data/kline-data，
+并链接到 public/frontend-data、public/kline-data。
+已存在的真实目录或指向别处的软链不会被覆盖。
 `
-
-/**
- * 生成每日数据（manifest / positions / backtest / comparison / 表现 CSV）
- *
- * @returns {{positionCount: number}}
- */
-function writeDailyData(root, dates, marketBySymbol) {
-  const frontendRoot = join(root, 'frontend-data')
-
-  // 先在整个窗口上模拟出每个 (策略, 标的) 的交易序列，再按日切分。
-  // 跨窗口连续模拟才能自然产生跨日仓位（前一天开、次日平）。
-  const tradesByKey = new Map()
-  const positionsByKey = new Map()
-  for (const strategy of STRATEGIES) {
-    for (const symbol of strategy.symbols) {
-      const market = marketBySymbol.get(symbol)
-      const trades = simulateTrades(strategy, symbol, market.minuteRows)
-      const key = `${strategy.dirName}|${symbol}`
-      tradesByKey.set(key, trades)
-      positionsByKey.set(key, buildDailyPositions(strategy, symbol, trades))
-    }
-  }
-
-  let positionCount = 0
-
-  for (const dateMs of dates) {
-    const compact = formatCompactDate(dateMs)
-    const isoDate = new Date(dateMs).toISOString().slice(0, 10)
-    const dayDir = join(frontendRoot, compact)
-
-    writeJson(join(dayDir, 'manifest.json'), buildManifest(compact))
-
-    const perfRows = []
-
-    for (const strategy of STRATEGIES) {
-      for (const symbol of strategy.symbols) {
-        const key = `${strategy.dirName}|${symbol}`
-        const market = marketBySymbol.get(symbol)
-        const symbolCfg = SYMBOLS.find((s) => s.symbol === symbol)
-        const positions = positionsByKey.get(key).get(isoDate) ?? []
-        positionCount += positions.length
-
-        const targetDir = join(dayDir, strategy.dirName, symbol)
-        // positions.json 始终存在：无仓位时为空数组，保证标的仍可点击查看纯 K 线
-        writeJson(join(targetDir, 'positions.json'), positions)
-
-        const backtestTrades = buildBacktestTrades(
-          strategy,
-          symbol,
-          positions,
-          market.minuteRows,
-          symbolCfg.decimals,
-        )
-        writeJson(join(targetDir, 'backtest.json'), backtestTrades)
-        writeJson(
-          join(targetDir, 'comparison.json'),
-          buildComparison(strategy, symbol, compact, positions, backtestTrades),
-        )
-
-        // 表现 CSV 是快照语义：含当天仍持有的仓位，故按整段交易序列筛选
-        perfRows.push(
-          ...buildPerformanceRows(
-            strategy,
-            symbol,
-            tradesByKey.get(key),
-            dateMs,
-            dateMs + MS_PER_DAY - 1,
-          ),
-        )
-      }
-    }
-
-    writeText(
-      join(frontendRoot, 'trading_data', `trading_positions_${compact}.csv`),
-      performanceRowsToCsv(perfRows),
-    )
-  }
-
-  writeJson(join(frontendRoot, 'strategies.json'), buildStrategyMeta())
-
-  return { positionCount }
-}
-
-/** 生成历史回测数据，返回 run 数量 */
-function writeBacktestData(root, todayMs) {
-  const backtestRoot = join(root, 'backtest-output')
-  const runs = planBacktestRuns(todayMs)
-
-  for (const run of runs) {
-    const { result, equityCsv } = buildBacktestRun(run)
-    const dir = join(backtestRoot, run.strategyId, run.dateDir, run.timeDir, run.symbol)
-    writeJson(join(dir, 'backtest_result.json'), result)
-    writeText(join(dir, 'backtest_equity.csv'), equityCsv)
-  }
-
-  return runs.length
-}
-
-/** 生成每日回测数据（每日回放页数据源），返回 run 数量 */
-function writeReplayData(root, dates) {
-  const replayRoot = join(root, 'data')
-  const runs = planReplayData(dates)
-
-  for (const run of runs) {
-    // {所属日期}/backtest_results/{策略}/{运行日期}/{时刻}/{标的}/
-    const dir = join(
-      replayRoot,
-      run.dayDir,
-      'backtest_results',
-      run.strategyId,
-      run.dateDir,
-      run.timeDir,
-      run.symbol,
-    )
-    writeJson(join(dir, 'backtest_result.json'), run.result)
-    writeText(join(dir, 'backtest_equity.csv'), run.equityCsv)
-  }
-
-  return runs.length
-}
 
 /** 建立 public/ 下的符号链接，返回被跳过路径的提示信息 */
 function linkPublicDirs(repoRoot, sampleRoot) {
   const notes = []
-  const linkNames = ['frontend-data', 'kline-data', 'backtest-output', 'data']
-
-  for (const name of linkNames) {
+  for (const name of ['frontend-data', 'kline-data']) {
     const linkPath = join(repoRoot, 'public', name)
     const targetPath = join(sampleRoot, name)
     const { result, current } = linkDir(linkPath, targetPath, sampleRoot)
@@ -216,7 +80,6 @@ function linkPublicDirs(repoRoot, sampleRoot) {
       notes.push(`  public/${name} 已存在（${current}），未改动`)
     }
   }
-
   return notes
 }
 
@@ -251,7 +114,6 @@ function main() {
       ` ~ ${new Date(todayMs).toISOString().slice(0, 10)}`,
   )
 
-  // 重新生成前清空，避免上次运行残留的旧日期目录堆积
   removeDir(sampleRoot)
   ensureDir(sampleRoot)
 
@@ -264,19 +126,18 @@ function main() {
     writeText(join(sampleRoot, 'kline-data', '1d', `${cfg.symbol}_1d.csv`), market.dailyCsv)
   }
 
-  console.log('[sample-data] 推导策略仓位与信号对比...')
-  const { positionCount } = writeDailyData(sampleRoot, dates, marketBySymbol)
+  console.log('[sample-data] 生成 frontend-data v2（仓位/信号/对比/回测索引）...')
+  const { positionCount, runCount } = writeFrontendDataV2({
+    sampleRoot,
+    dates,
+    marketBySymbol,
+    todayMs,
+  })
 
-  console.log('[sample-data] 合成历史回测...')
-  const runCount = writeBacktestData(sampleRoot, todayMs)
-
-  console.log('[sample-data] 合成每日回测...')
-  const replayCount = writeReplayData(sampleRoot, dates)
-
-  const runtimeCount = STRATEGIES.reduce((sum, s) => sum + s.symbols.length, 0)
+  const runtimeCount = STRATEGIES.reduce((sum, strategy) => sum + strategy.symbols.length, 0)
   console.log(
     `[sample-data] 完成：${STRATEGIES.length} 个策略 / ${runtimeCount} 个运行实例 / ` +
-      `${positionCount} 条仓位 / ${runCount} 次历史回测 / ${replayCount} 次每日回测`,
+      `${positionCount} 条仓位 / ${runCount} 次回测`,
   )
 
   if (!opts.link) {

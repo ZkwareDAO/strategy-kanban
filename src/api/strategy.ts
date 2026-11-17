@@ -1,29 +1,12 @@
 import { FRONTEND_DATA_BASE_URL } from '@/config/frontendData'
-import { extractDisplayPrefix } from '@/models/runtime'
+import { dataRepository } from '@/data'
+import { toChartPosition } from '@/services/livePerformance'
 import type { Runtime, RuntimeStatus, TradingMode } from '@/models/runtime'
 import type { Position } from '@/models/position'
 import type { SignalComparison } from '@/models/detail'
 import type { BacktestTrade } from '@/models/backtest'
 import type { KlinePoint } from '@/models/kline'
-import { enumerateDates } from '@/utils/dateRange'
 import { parseCsv } from '@/utils/csv'
-
-// ────────────────────────────────────────────────────────────────────
-// manifest.json
-// ────────────────────────────────────────────────────────────────────
-interface ManifestEntry {
-  strategy: string
-  symbol: string
-  trading_mode: string
-  runtime_name: string
-  status: string
-  source_strategy: string
-}
-
-interface Manifest {
-  date: string
-  strategies: ManifestEntry[]
-}
 
 function normalizeTradingMode(raw: string): TradingMode {
   switch (raw) {
@@ -41,118 +24,58 @@ function normalizeStatus(raw: string): RuntimeStatus {
 }
 
 /**
- * 获取策略运行实例列表（来自 frontend_data 的 manifest.json）
+ * 获取策略运行实例列表（frontend-data v2: {day}/manifest.csv）。
  *
- * manifest 中的命名已由 Python 脚本统一为实盘真实名称，
- * 因此前端不再需要 runtime_name 映射。
- * @param date 日期字符串，如 '20260806'
+ * strategy 统一取策略目录名（如 DEMO_MA_2H_1），source_strategy 只用于展示兜底。
+ * 新增策略不再需要前端配置任何名称映射。
  */
 export async function getRuntimes(date: string): Promise<Runtime[]> {
-  try {
-    const response = await fetch(`${FRONTEND_DATA_BASE_URL}/${date}/manifest.json`)
-    if (!response.ok) return []
-    const manifest: Manifest = await response.json()
-    if (!manifest.strategies) return []
+  const entries = await dataRepository.getDayManifest(date)
+  const seen = new Set<string>()
+  const runtimes: Runtime[] = []
 
-    const seen = new Set<string>()
-    const runtimes: Runtime[] = []
+  for (const entry of entries) {
+    // 每日收益是实盘页：纯回测（has_live=0）的策略不进入该列表
+    if (!entry.hasLive) continue
+    const key = `${entry.strategy}/${entry.symbol}`
+    if (seen.has(key)) continue
+    seen.add(key)
 
-    for (const entry of manifest.strategies) {
-      // 同一 (dir_name, symbol) 去重
-      const key = `${entry.strategy}/${entry.symbol}`
-      if (seen.has(key)) continue
-      seen.add(key)
-
-      runtimes.push({
-        runtime_name: entry.runtime_name,
-        dir_name: entry.strategy,
-        strategy: entry.source_strategy || entry.strategy,
-        symbol: entry.symbol,
-        trading_mode: normalizeTradingMode(entry.trading_mode),
-        status: normalizeStatus(entry.status),
-        display_name: extractDisplayPrefix(entry.runtime_name),
-      })
-    }
-
-    return runtimes
-  } catch {
-    return []
+    runtimes.push({
+      runtime_name: entry.runtimeName || `${entry.strategy}_${entry.symbol}`,
+      dir_name: entry.strategy,
+      strategy: entry.strategy,
+      symbol: entry.symbol,
+      trading_mode: normalizeTradingMode(entry.tradingMode),
+      status: normalizeStatus(entry.status),
+      display_name: entry.displayName || entry.sourceStrategy || entry.strategy,
+    })
   }
+
+  return runtimes
 }
 
 /**
- * 获取日期区间内所有 manifest 的运行实例（扁平合并）。
+ * 获取某策略某标的的实盘仓位（{day}/{strategy}/live_positions.csv）。
  *
- * 区间统计需要跨多日按 Product/Smoking 模式过滤仓位，而 manifest 是按日生成的，
- * 因此遍历区间内每一天调用 getRuntimes，扁平返回全部 Runtime[]
- * （不去重——由 utils/modeFilter.buildModeMap 在 (dir_name|asset) 维度
- *  并集去重）。任一日 fetch 失败静默跳过。
- *
- * @param createdFrom RFC3339 起始时间
- * @param createdTo   RFC3339 结束时间
+ * 文件是策略级、行级带 symbol；这里按 symbol 过滤并转成 K 线页 Position
+ * （realized_pnl 取 pnl_pct 百分数）。
  */
-export async function getRuntimesForDateRange(
-  createdFrom: string,
-  createdTo: string,
-): Promise<Runtime[]> {
-  const dates = enumerateDates(createdFrom, createdTo)
-  if (dates.length === 0) return []
-  const perDay = await Promise.all(dates.map((d) => getRuntimes(d)))
-  return perDay.flat()
+export async function getPositions(
+  dirName: string,
+  symbol: string,
+  date: string,
+): Promise<Position[]> {
+  const rows = await dataRepository.getLivePositions(date, dirName, symbol)
+  return rows.map(toChartPosition)
 }
 
 // ────────────────────────────────────────────────────────────────────
-// positions.json
+// v1 详情页遗留读取（/detail/:strategy/:symbol），暂保留旧路径。
+// v2 详情页使用 TokenDetailV2，不再调用以下函数。
 // ────────────────────────────────────────────────────────────────────
 
-/**
- * 获取持仓数据
- * @param dirName frontend_data 下的策略目录名（如 DOLPHINV2_4H_2）
- * @param symbol 交易对（如 BTCUSDT）
- * @param date 日期字符串（如 20260806）
- * @returns 持仓数组，文件不存在或无仓位时返回空数组
- */
-export async function getPositions(dirName: string, symbol: string, date: string): Promise<Position[]> {
-  try {
-    const response = await fetch(`${FRONTEND_DATA_BASE_URL}/${date}/${dirName}/${symbol}/positions.json`)
-    if (!response.ok) return []
-    const data: unknown = await response.json()
-    return parsePositions(data)
-  } catch {
-    return []
-  }
-}
-
-function parsePositions(json: unknown): Position[] {
-  if (!Array.isArray(json)) return []
-  return json.flatMap((raw): Position[] => {
-    if (!raw || typeof raw !== 'object') return []
-    const r = raw as Record<string, unknown>
-    return [{
-      position_id: String(r.position_id ?? ''),
-      type: r.type === 'short' ? 'short' : 'long',
-      entry_time: r.entry_time == null ? null : String(r.entry_time),
-      exit_time: r.exit_time == null ? null : String(r.exit_time),
-      entry_price: toNumber(r.entry_price),
-      exit_price: r.exit_price == null ? null : toNumber(r.exit_price),
-      realized_pnl: r.realized_pnl == null ? null : toNumber(r.realized_pnl),
-      max_potential_pnl: toNumber(r.max_potential_pnl),
-      max_drawdown: toNumber(r.max_drawdown),
-    }]
-  })
-}
-
-// ────────────────────────────────────────────────────────────────────
-// backtest.json
-// ────────────────────────────────────────────────────────────────────
-
-/**
- * 获取回放交易数据
- * @param date 日期字符串（如 20260806）
- * @param dirName 策略目录名（如 DOLPHINV2_4H_2）
- * @param symbol 交易对（如 BTCUSDT）
- * @returns 回放交易记录数组，无数据时返回空数组
- */
+/** 获取回放交易数据（v1） */
 export async function getBacktestTrades(
   date: string,
   dirName: string,
@@ -182,16 +105,7 @@ function parseBacktestTrades(json: unknown): BacktestTrade[] {
   })
 }
 
-// ────────────────────────────────────────────────────────────────────
-// comparison.json
-// ────────────────────────────────────────────────────────────────────
-
-/**
- * 获取信号对比数据
- * @param dirName 策略目录名（如 DOLPHINV2_4H_2）
- * @param symbol 交易对（如 BTCUSDT）
- * @param date 日期字符串（如 20260806）
- */
+/** 获取信号对比数据（v1） */
 export async function getComparison(
   dirName: string,
   symbol: string,
@@ -204,16 +118,7 @@ export async function getComparison(
   return response.json()
 }
 
-// ────────────────────────────────────────────────────────────────────
-// K线（v1 详情页遗留路径：仍从 public/data 下的 pnl/kline CSV 读取。
-// v2 已改为从 public/kline-data 独立读取，见 api/klineV2.ts）
-// ────────────────────────────────────────────────────────────────────
-
-/**
- * 获取K线数据（v1 详情页使用）
- * @param runtime_name 运行实例名称
- * @param date 日期字符串
- */
+/** 获取K线数据（v1） */
 export async function getKline(runtime_name: string, date: string): Promise<KlinePoint[]> {
   try {
     const response = await fetch(`/data/${date}/pnl/kline/${runtime_name}/${date}.csv`)
@@ -244,10 +149,6 @@ function parseKline(csv: string): KlinePoint[] {
       is_exit: row.is_exit === 'True',
     }))
 }
-
-// ────────────────────────────────────────────────────────────────────
-// helpers
-// ────────────────────────────────────────────────────────────────────
 
 function toNumber(value: unknown): number {
   if (value == null || value === '') return 0

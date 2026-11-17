@@ -11,7 +11,7 @@
         <h2>{{ strategy }} / {{ symbol }}</h2>
         <p v-if="result">
           回测区间: {{ result.config?.start_date ?? '?' }} ~ {{ result.config?.end_date ?? '?' }}
-          <span v-if="btDate"> | 运行: {{ formatDate(btDate) }} {{ formatTime(btTime) }}</span>
+          <span v-if="runStamp"> | 运行批次: {{ runStamp }}</span>
         </p>
       </div>
 
@@ -20,7 +20,11 @@
         <div v-if="equityData.length" ref="chartContainer" class="chart-container" />
         <div v-else class="chart-empty">
           <p>无权益曲线数据</p>
-          <p class="chart-empty-hint">请检查 backtest_equity.csv 是否存在于 {{ dataBase }}/{{ btPath }}/</p>
+          <p class="chart-empty-hint">
+            请检查
+            {{ isDiscovery ? 'discovery/' : `${day}/` }}{{ strategy }}/backtest_results/{{ runStamp }}/{{ symbol }}.json
+            是否包含 daily_equity
+          </p>
         </div>
       </div>
 
@@ -163,13 +167,8 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Plotly, { type Data, type Layout, type Config } from 'plotly.js-dist-min'
-import {
-  getBacktestResult,
-  getBacktestEquity,
-  getDailyKlineClose,
-  BACKTEST_BASE,
-  REPLAY_BASE,
-} from '@/api/backtest'
+import { getDailyKlineClose } from '@/api/backtest'
+import { dataRepository } from '@/data'
 import { formatSymbol } from '@/utils/display'
 import type { BacktestResult } from '@/models/backtest'
 import type { EquityPoint, DailyClosePoint } from '@/api/backtest'
@@ -182,16 +181,11 @@ const props = defineProps<{
 const route = useRoute()
 const router = useRouter()
 
-const btPath = route.query.path as string
-const btDate = route.query.date as string
-const btTime = route.query.time as string
-/**
- * 数据来源：'replay' 来自「每日回放」（/data），其余为「策略发现」（/backtest-output）。
- *
- * 两处的叶子目录结构与文件格式完全相同，故共用本页面，只需切换数据根。
- */
-const isReplay = route.query.source === 'replay'
-const dataBase = isReplay ? REPLAY_BASE : BACKTEST_BASE
+/** 数据所属日期 YYYYMMDD 与回测批次 YYYYMMDDTHHMMSS */
+const day = (route.query.day as string) || ''
+const runStamp = (route.query.runStamp as string) || ''
+/** discovery 使用全局目录，replay 使用 {day}/{strategy} */
+const isDiscovery = route.query.source === 'discovery'
 
 const loading = ref(true)
 const error = ref('')
@@ -204,16 +198,22 @@ async function loadData() {
   loading.value = true
   error.value = ''
   try {
+    if (!runStamp || (!isDiscovery && !day)) {
+      throw new Error('缺少回测定位参数（day / runStamp）')
+    }
+
     // Step 1: fetch result first to get date range for price query
-    const res = await getBacktestResult(btPath, dataBase)
+    const res = isDiscovery
+      ? await dataRepository.getDiscoveryResult(props.strategy, runStamp, props.symbol)
+      : await dataRepository.getBacktestResult(day, props.strategy, runStamp, props.symbol)
     result.value = res
 
     const startDate = res?.config?.start_date ?? '2020-01-01'
     const endDate = res?.config?.end_date ?? '2030-12-31'
 
-    // Step 2: fetch equity and price in parallel
+    // Step 2: 权益曲线直接取结果 JSON 的 daily_equity；价格曲线并行加载
     const [equity, price] = await Promise.all([
-      getBacktestEquity(btPath, dataBase),
+      Promise.resolve(res?.daily_equity ?? []),
       getDailyKlineClose(props.symbol, startDate, endDate),
     ])
     equityData.value = equity
@@ -376,16 +376,6 @@ function fmtNum(v: number | undefined | null, digits = 2): string {
 function fmtInt(v: number | undefined | null): string {
   if (v == null || Number.isNaN(v)) return '-'
   return String(Math.round(v))
-}
-
-function formatDate(date: string): string {
-  if (!date || date.length !== 8) return date || '-'
-  return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`
-}
-
-function formatTime(time: string): string {
-  if (!time || time.length !== 6) return time || ''
-  return `${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}`
 }
 
 function fmtDuration(v: number | undefined | null): string {

@@ -179,6 +179,8 @@ export function buildBacktestRun({
       },
     ],
     metrics,
+    // v2：权益曲线放在结果 JSON，前端不再读取 backtest_equity.csv
+    daily_equity: equity,
   }
 
   return { result, equityCsv: equityToCsv(equity) }

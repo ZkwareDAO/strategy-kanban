@@ -13,7 +13,7 @@
  * `deleted` 不是软删除，而是平仓标志（实测 532 行中 deleted 与 close_time
  * 100% 一致）。同一笔仓位跨日会从 0 变 1，且**浮盈与最终盈亏可以反向**：
  *
- *   SAR_SNT3_V3_8H_3_XRPUSDC
+ *   DEMO_SCORE_8H_3_XRPUSDC
  *     0811 deleted=0 pnl=+0.1073   ← 浮盈
  *     0812 deleted=1 pnl=-0.0488   ← 平仓后实亏，方向反转
  *

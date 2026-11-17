@@ -39,6 +39,15 @@ describe('StrategyLogic', () => {
     expect((wrapper.vm as any).expanded).toBe(false)
   })
 
+  it('should not render exit conditions', async () => {
+    const wrapper = mount(StrategyLogic, { props: { logic: mockLogic } })
+    await wrapper.find('.logic-header').trigger('click')
+    expect(wrapper.text()).toContain('入场条件')
+    expect(wrapper.text()).toContain('风控规则')
+    expect(wrapper.text()).not.toContain('出场条件')
+    expect(wrapper.findAll('.logic-section')).toHaveLength(2)
+  })
+
   it('should render nothing when logic is undefined', async () => {
     const wrapper = mount(StrategyLogic, { props: { logic: undefined } })
     expect(wrapper.text()).toContain('策略逻辑')

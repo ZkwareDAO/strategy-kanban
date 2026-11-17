@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { getWarmupKline, MAX_WARMUP_1M_DAYS } from '@/api/klineWarmup'
 import { KLINE_BASE_URL } from '@/config/klineSource'
+import { clearProbeCache } from '@/utils/klineRange'
 
 /** 构造 CSV（与 klineV2.test.ts / klineRange.test.ts 同风格：open 值标识行） */
 function buildCsv(rows: string[]): string {
@@ -39,7 +40,10 @@ const URL_4H = `${KLINE_BASE_URL}/4h/BTCUSDT_4h.csv`
 const URL_1M = `${KLINE_BASE_URL}/1m/BTCUSDT_1m.csv`
 
 describe('getWarmupKline', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    clearProbeCache()
+  })
 
   it('should return the last N bars from the aggregate CSV, ascending', async () => {
     const rows = [

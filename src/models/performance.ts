@@ -10,7 +10,7 @@ export interface OrderPosition {
   id?: string
   /** 交易对，如 BTCUSDT */
   asset: string
-  /** 策略名，格式 {strategy_dir}_{SYMBOL}，如 NEWOBV_4H_1_BTCUSDT */
+  /** 策略名，格式 {strategy_dir}_{SYMBOL}，如 DEMO_VOLUME_4H_1_BTCUSDT */
   strategy_name: string
   /** 仓位类型：2=期货 */
   pos_type: number
@@ -24,6 +24,11 @@ export interface OrderPosition {
   close_time: string | null
   /** 杠杆倍数（API 返回，默认 1） */
   leverage: number
+  /**
+   * 交易模式。新版 live_positions.csv 行内直接带 trading_mode，
+   * 不再依赖 manifest 反查；旧数据可能缺失。
+   */
+  trading_mode?: PerformanceMode
 }
 
 /** 交易模式类型（与 runtime.ts 的 TradingMode 一致，避免循环依赖此处内联） */

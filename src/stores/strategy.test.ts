@@ -11,13 +11,13 @@ import { getRuntimes, getPositions } from '@/api/strategy'
 
 function mockRuntime(overrides: Record<string, unknown> = {}) {
   return {
-    runtime_name: 'ICT_1D_4_BTCUSDT_LIVE',
-    dir_name: 'ICT_1D_4',
-    strategy: 'cta_ict_v4',
+    runtime_name: 'DEMO_TREND_1D_4_BTCUSDT_LIVE',
+    dir_name: 'DEMO_TREND_1D_4',
+    strategy: 'demo_trend',
     symbol: 'BTCUSDT',
     trading_mode: 'live' as const,
     status: 'success' as const,
-    display_name: 'ICT',
+    display_name: 'DEMO_TREND',
     ...overrides,
   }
 }
@@ -43,9 +43,9 @@ describe('StrategyStore', () => {
       const mockRuntimes = [
         mockRuntime(),
         mockRuntime({
-          runtime_name: 'RBREAKER_15M_3_BTCUSDT_PAPER',
-          dir_name: 'RBREAKER_15M_3',
-          strategy: 'cta_rbreaker_v3',
+          runtime_name: 'DEMO_BREAKOUT_15M_3_BTCUSDT_PAPER',
+          dir_name: 'DEMO_BREAKOUT_15M_3',
+          strategy: 'demo_breakout',
           trading_mode: 'paper_trading',
         }),
       ]
@@ -96,9 +96,9 @@ describe('StrategyStore', () => {
       ]
       vi.mocked(getPositions).mockResolvedValueOnce(mockPositions)
       const store = useStrategyStore()
-      await store.fetchPositions('ICT_1D_4', 'BTCUSDT', '20260806', 'ICT_1D_4_BTCUSDT_LIVE')
-      expect(getPositions).toHaveBeenCalledWith('ICT_1D_4', 'BTCUSDT', '20260806')
-      expect(store.positions['ICT_1D_4_BTCUSDT_LIVE']).toEqual(mockPositions)
+      await store.fetchPositions('DEMO_TREND_1D_4', 'BTCUSDT', '20260806', 'DEMO_TREND_1D_4_BTCUSDT_LIVE')
+      expect(getPositions).toHaveBeenCalledWith('DEMO_TREND_1D_4', 'BTCUSDT', '20260806')
+      expect(store.positions['DEMO_TREND_1D_4_BTCUSDT_LIVE']).toEqual(mockPositions)
     })
   })
 
@@ -108,16 +108,16 @@ describe('StrategyStore', () => {
       store.runtimes = [
         mockRuntime(),
         mockRuntime({
-          runtime_name: 'RBREAKER_15M_3_BTCUSDT_PAPER',
-          dir_name: 'RBREAKER_15M_3',
-          strategy: 'cta_rbreaker_v3',
+          runtime_name: 'DEMO_BREAKOUT_15M_3_BTCUSDT_PAPER',
+          dir_name: 'DEMO_BREAKOUT_15M_3',
+          strategy: 'demo_breakout',
           trading_mode: 'paper_trading',
         }),
       ]
       store.selectedMode = 'live'
       const filtered = store.filteredRuntimes
       expect(filtered).toHaveLength(1)
-      expect(filtered[0].runtime_name).toBe('ICT_1D_4_BTCUSDT_LIVE')
+      expect(filtered[0].runtime_name).toBe('DEMO_TREND_1D_4_BTCUSDT_LIVE')
     })
   })
 
@@ -142,9 +142,9 @@ describe('StrategyStore', () => {
       const store = useStrategyStore()
       store.selectedMode = ''
       store.runtimes = [
-        mockRuntime({ runtime_name: 'A_LIVE', strategy: 'cta_ict_v4' }),
-        mockRuntime({ runtime_name: 'B_PAPER', strategy: 'cta_ict_v4', trading_mode: 'paper_trading' }),
-        mockRuntime({ runtime_name: 'C_PAPER', dir_name: 'RBREAKER_15M_3', strategy: 'cta_rbreaker_v3', trading_mode: 'paper_trading' }),
+        mockRuntime({ runtime_name: 'A_LIVE', strategy: 'demo_trend' }),
+        mockRuntime({ runtime_name: 'B_PAPER', strategy: 'demo_trend', trading_mode: 'paper_trading' }),
+        mockRuntime({ runtime_name: 'C_PAPER', dir_name: 'DEMO_BREAKOUT_15M_3', strategy: 'demo_breakout', trading_mode: 'paper_trading' }),
       ]
       store.positions = {
         'A_LIVE': [
@@ -157,7 +157,7 @@ describe('StrategyStore', () => {
       }
       const summaries = store.strategySummaries
       expect(summaries).toHaveLength(2)
-      const ict = summaries.find((s) => s.strategy === 'cta_ict_v4')
+      const ict = summaries.find((s) => s.strategy === 'demo_trend')
       expect(ict).toBeDefined()
       expect(ict!.position_count).toBe(3)
       expect(ict!.completed_count).toBe(3)

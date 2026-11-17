@@ -12,7 +12,7 @@ export type PositionType = 'long' | 'short'
  * 持仓信息
  * @example
  * const position: Position = {
- *   position_id: 'DOLPHIN_4H_2_BTCUSDT_LIVE_BTCUSDT_1786034700',
+ *   position_id: 'DEMO_TREND_B_4H_2_BTCUSDT_LIVE_BTCUSDT_1786034700',
  *   type: 'short',
  *   entry_time: '2026-08-06T16:45:00+00:00',
  *   exit_time: '2026-08-06T23:22:02.483106+00:00',

@@ -44,9 +44,9 @@ describe('strategyMeta', () => {
   })
 
   it('falls back to normalized uppercase key', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ OBVATRV2: { display_name: 'X' } }) })))
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ DEMOVOLATILITY: { display_name: 'X' } }) })))
     const m = await import('@/api/strategyMeta')
     await m.loadStrategyMeta()
-    expect(m.getStrategyMeta('obv_atr_v2')?.display_name).toBe('X')
+    expect(m.getStrategyMeta('demo_volatility')?.display_name).toBe('X')
   })
 })

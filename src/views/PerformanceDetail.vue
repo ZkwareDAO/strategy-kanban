@@ -82,13 +82,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getOrderPositions } from '@/api/performance'
-import { getRuntimesForDateRange } from '@/api/strategy'
-import { buildModeIndex, filterPositionsByModes, dedupePositions, findRuntimeForAsset, type SelectableMode, type ModeIndex } from '@/utils/modeFilter'
+import { dataRepository } from '@/data'
+import { loadOrderPositions } from '@/services/livePerformance'
+import { filterPositionsByTradingMode, type SelectableMode } from '@/utils/modeFilter'
 import { accumulatePnlSplit, initPnlSplit } from '@/utils/perfAggregate'
-import { splitRealizedAndOpen, isFuturesPosition } from '@/utils/positionSplit'
+import { splitRealizedAndOpen } from '@/utils/positionSplit'
 import type { OrderPosition, SymbolPerformance } from '@/models/performance'
-import type { Runtime } from '@/models/runtime'
 
 const props = defineProps<{
   strategyName: string
@@ -124,23 +123,6 @@ const tf = (route.query.tf as string) || '1h'
 const loading = ref(true)
 const error = ref('')
 const rawPositions = ref<OrderPosition[]>([])
-const modeIndex = ref<ModeIndex>({ exact: new Map(), byBase: new Map() })
-// 区间内所有运行实例，用于跳转蜡烛图时按 (dir_name, symbol, 模式) 反查 source_strategy / runtime_name
-const runtimes = ref<Runtime[]>([])
-
-function toRfc3339(d: Date): string {
-  return d.toISOString().replace(/\.\d{3}Z$/, 'Z')
-}
-
-function dateToStartOfDay(dateStr: string): Date {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0))
-}
-
-function dateToEndOfDay(dateStr: string): Date {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, d, 23, 59, 59))
-}
 
 /** 已实现 / 持仓中拆分：共用 positionSplit 的口径，与每日收益、区间统计一致 */
 const positionSplit = computed(() => splitRealizedAndOpen(rawPositions.value))
@@ -217,32 +199,20 @@ async function fetchData() {
   loading.value = true
   error.value = ''
   try {
-    const from = toRfc3339(dateToStartOfDay(dateFrom))
-    const to = toRfc3339(dateToEndOfDay(dateTo))
-    const [allPositions, rangeRuntimes] = await Promise.all([
-      getOrderPositions(from, to),
-      getRuntimesForDateRange(from, to),
-    ])
-    modeIndex.value = buildModeIndex(rangeRuntimes)
-    runtimes.value = rangeRuntimes
-    // 1. 只保留期货仓位——期权（pos_type=3）不在 manifest 里，放进模式过滤
-    //    会被判为"未关联"，且本就不属于本页统计范围。与「区间统计」的顺序一致。
-    // 2. 匹配策略组：strategy_name 以策略组名开头
-    //    （如 DOLPHINV2_4H_2_DOGEUSDT 匹配 DOLPHINV2_4H_2）
-    // 3. 跨日快照去重（同一笔未平仓位在每日 CSV 中重复出现）
-    // 4. 再按所选模式（Product/Smoking）过滤
-    // 已实现 / 持仓中的拆分留到 positionSplit（去重之后），避免同一笔被两侧重复统计。
-    const inStrategy = allPositions.filter(p => {
-      if (!isFuturesPosition(p)) return false
-      if (p.strategy_name === props.strategyName) return true
-      return p.strategy_name.startsWith(props.strategyName + '_')
-    })
-    const result = filterPositionsByModes(
-      dedupePositions(inStrategy),
-      modeIndex.value,
-      selectedModes,
-    )
-    rawPositions.value = result.positions
+    const fromDay = dateFrom.replace(/-/g, '')
+    const toDay = dateTo.replace(/-/g, '')
+    const catalog = await dataRepository.getCatalog()
+    // 只为区间内确实存在该策略的日期发请求；live_positions.csv 是策略级文件
+    const days = catalog
+      .filter(
+        (day) =>
+          day.day >= fromDay &&
+          day.day <= toDay &&
+          day.strategies.includes(props.strategyName),
+      )
+      .map((day) => ({ ...day, strategies: [props.strategyName] }))
+    const positions = await loadOrderPositions(days)
+    rawPositions.value = filterPositionsByTradingMode(positions, selectedModes).positions
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -250,33 +220,19 @@ async function fetchData() {
   }
 }
 
-// 按 (dir_name, asset, 选中模式) 反查 runtime，用于跳转蜡烛图时补齐 dir/runtime
-// 参数，使 TokenDetailV2 能加载开平仓点、回放、对比数据与策略逻辑（与每日收益入口一致）。
-// 支持结算币回退：仓位 asset 为 WLDUSDC 时也能找到 manifest 里的 WLDUSDT runtime。
-function findRuntime(symbol: string): Runtime | undefined {
-  return findRuntimeForAsset(runtimes.value, props.strategyName, symbol, selectedModes)
-}
-
+// 新版路由以策略目录名 + 标的定位数据文件，无需再反查 runtime。
 function goCandle(symbol: string) {
-  const runtime = findRuntime(symbol)
-  // route param strategy 用 source_strategy（策略内部名），用于匹配策略逻辑配置；
-  // 没有 runtime 时回退为 dir_name，TokenDetailV2 会以纯K线模式展示。
-  const sourceStrategy = runtime?.strategy ?? props.strategyName
-  // symbol 用 runtime.symbol 而非仓位 asset：数据文件目录按 manifest 的交易对命名，
-  // 结算币漂移时（仓位 WLDUSDC / 目录 WLDUSDT）用 asset 会让四条数据路径全部 404，
-  // 蜡烛图退化成纯K线。runtime 已由 findRuntimeForAsset 跨结算币找到，取其 symbol 才对得上磁盘。
-  const dataSymbol = runtime?.symbol ?? symbol
   router.push({
     name: 'TokenDetailV2',
     params: {
-      strategy: sourceStrategy,
-      symbol: dataSymbol,
+      strategy: props.strategyName,
+      symbol,
     },
     query: {
       from: dateFrom,
       to: dateTo,
       tf,
-      ...(runtime ? { runtime: runtime.runtime_name, dir: runtime.dir_name } : {}),
+      source: 'live',
     },
   })
 }

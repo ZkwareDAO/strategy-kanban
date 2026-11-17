@@ -45,7 +45,8 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useStrategyStore } from '@/stores/strategy'
 import { useAppStore } from '@/stores/app'
-import { getOrderPositions } from '@/api/performance'
+import { loadOrderPositions } from '@/services/livePerformance'
+import { getLatestCatalogDay } from '@/services/catalog'
 import { splitRealizedAndOpen } from '@/utils/positionSplit'
 import type { StrategyPerformance, OrderPosition } from '@/models/performance'
 import StrategyList from '@/components/strategy/StrategyList.vue'
@@ -63,7 +64,7 @@ const activeTab = ref<'strategy' | 'backtest' | 'performance' | 'replay'>('strat
 const orderPositions = ref<OrderPosition[]>([])
 
 /**
- * 按策略目录名聚合的绩效数据（key = dir_name，如 DOLPHINV2_4H_2）
+ * 按策略目录名聚合的绩效数据（key = dir_name，如 DEMO_TREND_B_4H_2）
  *
  * 已平仓与持仓中分离统计：持仓中的交易尚未完成，其 pnl_value 是随行情浮动的
  * 未实现盈亏，计入 total_pnl/win_rate 会污染已实现指标，故单列
@@ -74,11 +75,8 @@ const performanceMap = computed<Record<string, StrategyPerformance>>(() => {
   const map = new Map<string, StrategyPerformance>()
   const { realized, open } = splitRealizedAndOpen(orderPositions.value)
 
-  /** 取出（或初始化）该 dir_name 的聚合桶 */
-  function bucketFor(strategyName: string): StrategyPerformance {
-    // strategy_name 格式 {dir_name}_{SYMBOL}，去掉最后一段得到 dir_name
-    const idx = strategyName.lastIndexOf('_')
-    const dirName = idx > 0 ? strategyName.slice(0, idx) : strategyName
+  /** 取出（或初始化）该策略目录的聚合桶 */
+  function bucketFor(dirName: string): StrategyPerformance {
     let perf = map.get(dirName)
     if (!perf) {
       perf = { strategy_name: dirName, total_trades: 0, winning_trades: 0, losing_trades: 0, win_rate: 0, total_pnl: 0, max_leverage: 1, mode: 'live', open_trades: 0, floating_pnl: 0 }
@@ -109,22 +107,23 @@ const performanceMap = computed<Record<string, StrategyPerformance>>(() => {
 })
 
 async function loadPerformance(date: string) {
-  // 取当天的 RFC3339 区间
-  const y = date.slice(0, 4)
-  const m = date.slice(4, 6)
-  const d = date.slice(6, 8)
-  const from = `${y}-${m}-${d}T00:00:00Z`
-  const to = `${y}-${m}-${d}T23:59:59Z`
-  orderPositions.value = await getOrderPositions(from, to)
+  // 当日 manifest 里的策略目录；live_positions.csv 是策略级文件，按策略一次取回
+  const strategies = [...new Set(strategyStore.runtimes.map((runtime) => runtime.strategy))]
+  if (strategies.length === 0) {
+    orderPositions.value = []
+    return
+  }
+  orderPositions.value = await loadOrderPositions([
+    { day: date, strategies, hasLive: true, hasBacktest: false, updatedAt: '' },
+  ])
 }
 
 async function handleDateChange(date: string) {
   selectedDate.value = date
   appStore.setDate(date)
-  await Promise.all([
-    strategyStore.fetchRuntimes(date),
-    loadPerformance(date),
-  ])
+  // 必须先拿到 manifest，才能知道当天有哪些策略目录
+  await strategyStore.fetchRuntimes(date)
+  await loadPerformance(date)
 }
 
 function handleViewPosition(runtimeName: string, symbol: string) {
@@ -137,24 +136,24 @@ function handleViewPosition(runtimeName: string, symbol: string) {
         symbol: symbol,
       },
       query: {
-        runtime: runtime.runtime_name,
-        dir: runtime.dir_name,
         date: appStore.date,
+        source: 'live',
+        dir: runtime.dir_name,
       },
     })
   }
 }
 
-function handleViewPerformance(sourceStrategy: string) {
-  // 找到该 source_strategy 对应的 dir_name，传给 PerformanceDetail
-  const runtime = strategyStore.runtimes.find(r => r.strategy === sourceStrategy)
-  const dirName = runtime?.dir_name ?? sourceStrategy
+function handleViewPerformance(strategy: string) {
+  const runtime = strategyStore.runtimes.find(r => r.strategy === strategy)
+  const strategyKey = runtime?.dir_name ?? strategy
+  const isoDate = selectedDate.value.slice(0, 4) + '-' + selectedDate.value.slice(4, 6) + '-' + selectedDate.value.slice(6, 8)
   router.push({
     name: 'PerformanceDetail',
-    params: { strategyName: dirName },
+    params: { strategyName: strategyKey },
     query: {
-      from: selectedDate.value.slice(0, 4) + '-' + selectedDate.value.slice(4, 6) + '-' + selectedDate.value.slice(6, 8),
-      to: selectedDate.value.slice(0, 4) + '-' + selectedDate.value.slice(4, 6) + '-' + selectedDate.value.slice(6, 8),
+      from: isoDate,
+      to: isoDate,
       from_tab: 'strategy',
     },
   })
@@ -170,17 +169,14 @@ onMounted(async () => {
   // 如果 appStore 已经有日期（从详情页返回），使用之前选择的日期
   // 否则默认选择昨天的日期
   if (appStore.date) {
-    selectedDate.value = appStore.date
-    await Promise.all([
-      strategyStore.fetchRuntimes(appStore.date),
-      loadPerformance(appStore.date),
-    ])
+    await handleDateChange(appStore.date)
   } else {
+    // 默认对齐数据最新一天，避免离线数据滞后时打开就是空态
+    const latest = await getLatestCatalogDay()
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)
-    const defaultDate = yesterday.toISOString().slice(0, 10).replace(/-/g, '')
-    selectedDate.value = defaultDate
-    await handleDateChange(defaultDate)
+    const fallback = yesterday.toISOString().slice(0, 10).replace(/-/g, '')
+    await handleDateChange(latest?.compact ?? fallback)
   }
 })
 

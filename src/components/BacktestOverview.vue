@@ -22,7 +22,9 @@
 
     <!-- 状态 -->
     <div v-if="loading" class="state">加载中...</div>
-    <div v-else-if="filteredGroups.length === 0" class="state">暂无回测数据</div>
+    <div v-else-if="filteredGroups.length === 0" class="state">
+      该日期范围暂无 discovery 回测
+    </div>
 
     <!-- 策略层级分组表格 -->
     <div v-else class="table-wrapper">
@@ -80,10 +82,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { getBacktestIndex } from '@/api/backtest'
-import { groupRuns } from '@/utils/backtestIndex'
+import { dataRepository } from '@/data'
+import {
+  groupBacktestRuns,
+  loadBacktestRuns,
+  type BacktestRunGroupRow,
+} from '@/services/backtestRuns'
 import { formatSymbol } from '@/utils/display'
-import type { BacktestOutputEntry, BacktestGroupRow } from '@/models/backtest'
+import type { BacktestRunRow } from '@/models/dataset'
 
 const router = useRouter()
 
@@ -91,7 +97,7 @@ const router = useRouter()
 const PAGE_SIZE = 20
 
 const loading = ref(false)
-const entries = ref<BacktestOutputEntry[]>([])
+const runRows = ref<BacktestRunRow[]>([])
 const selectedStrategy = ref('')
 const currentPage = ref(1)
 
@@ -101,12 +107,14 @@ const sortKey = ref<SortKey>('completed_at')
 const sortAsc = ref(false)
 
 const availableStrategies = computed(() => {
-  const set = new Set(entries.value.map(e => e.strategy))
+  const set = new Set(runRows.value.map(e => e.strategy))
   return Array.from(set).sort()
 })
 
-// 分组：策略 + 回测区间 + 运行日期 + 同日轮次，保留全部历史记录
-const groups = computed<BacktestGroupRow[]>(() => groupRuns(entries.value))
+// 分组：策略 + 批次，保留每次 discovery 回测
+const groups = computed<BacktestRunGroupRow[]>(() =>
+  groupBacktestRuns(runRows.value, { groupBy: 'runDay' }),
+)
 
 const filteredGroups = computed(() => {
   if (!selectedStrategy.value) return groups.value
@@ -178,8 +186,8 @@ function sortArrow(key: SortKey): string {
   return sortAsc.value ? '▲' : '▼'
 }
 
-function groupKey(g: BacktestGroupRow): string {
-  return `${g.strategy}|${g.start_date}|${g.end_date}|${g.date}|${g.sweep}`
+function groupKey(g: BacktestRunGroupRow): string {
+  return `${g.strategy}|${g.day}|${g.batch_id}`
 }
 
 function formatCompletedAt(ts: string): string {
@@ -200,16 +208,15 @@ function pctClass(v: number): string {
   return v > 0 ? 'val-positive' : v < 0 ? 'val-negative' : ''
 }
 
-function goTokenList(g: BacktestGroupRow) {
+function goTokenList(g: BacktestRunGroupRow) {
   router.push({
     name: 'BacktestTokenList',
     query: {
+      day: g.day,
       strategy: g.strategy,
       start_date: g.start_date,
       end_date: g.end_date,
-      // 定位到具体这一次历史回测（同区间可能跑过多次）
-      date: g.date,
-      sweep: String(g.sweep),
+      source: 'discovery',
     },
   })
 }
@@ -217,21 +224,17 @@ function goTokenList(g: BacktestGroupRow) {
 async function loadRows() {
   loading.value = true
   try {
-    // 索引已内嵌展示所需指标，无需逐个拉取 backtest_result.json
-    entries.value = await getBacktestIndex()
+    // 优先读取全局 discovery/runs.csv；旧数据源缺失时回退按天扫描
+    const discovery = await dataRepository.getDiscoveryRuns()
+    runRows.value = discovery.length
+      ? discovery
+      : await loadBacktestRuns(await dataRepository.getCatalog(), { source: 'discovery' })
   } finally {
     loading.value = false
   }
 }
 
 onMounted(loadRows)
-
-// dev 期间监听 vite 插件推送的索引更新事件，自动重新加载
-if (import.meta.hot) {
-  import.meta.hot.on('backtest-index-updated', () => {
-    loadRows()
-  })
-}
 </script>
 
 <style scoped lang="scss">

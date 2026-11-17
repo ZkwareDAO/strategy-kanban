@@ -32,9 +32,9 @@ const expanded = ref(false)
 
 const sections = computed<LogicSection[]>(() => {
   if (!props.logic) return []
+  // 展示层只保留开仓与风控，平仓条件不再展示
   return [
     props.logic.entry_conditions,
-    props.logic.exit_conditions,
     props.logic.risk_management,
   ]
 })

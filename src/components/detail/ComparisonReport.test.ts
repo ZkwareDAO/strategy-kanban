@@ -4,7 +4,7 @@ import ComparisonReport from '@/components/detail/ComparisonReport.vue'
 import type { SignalComparison } from '@/models/detail'
 
 const mockComparison: SignalComparison = {
-  strategy: 'ERP_2H_1',
+  strategy: 'DEMO_MA_2H_1',
   symbol: 'BTCUSDT',
   date: '20260101',
   total_live: 12,

@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:data": "node scripts/dev-data-server.mjs",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "sample-data": "node scripts/sample-data/index.mjs",

@@ -29,24 +29,24 @@ describe('formatSymbol', () => {
 
 describe('formatStrategyName', () => {
   it('strips minute timeframe and version', () => {
-    expect(formatStrategyName('VWAPMOM_15M_1')).toBe('VWAPMOM')
+    expect(formatStrategyName('DEMO_FLOW_15M_1')).toBe('DEMO_FLOW')
   })
 
   it('strips hour timeframe and version', () => {
-    expect(formatStrategyName('ERP_2H_1')).toBe('ERP')
+    expect(formatStrategyName('DEMO_MA_2H_1')).toBe('DEMO_MA')
   })
 
   it('strips day timeframe and version', () => {
-    expect(formatStrategyName('ICT_1D_3')).toBe('ICT')
+    expect(formatStrategyName('DEMO_TREND_1D_3')).toBe('DEMO_TREND')
   })
 
   it('keeps an inner version segment intact', () => {
-    expect(formatStrategyName('SAR_SNT3_V3_8H_3')).toBe('SAR_SNT3_V3')
+    expect(formatStrategyName('DEMO_SCORE_V3_8H_3')).toBe('DEMO_SCORE_V3')
   })
 
   it('strips only the trailing two segments, not the whole tail', () => {
-    expect(formatStrategyName('REGIMEDONCHIANATR_4H_2')).toBe('REGIMEDONCHIANATR')
-    expect(formatStrategyName('EMARSIPULLBACK_4H_2')).toBe('EMARSIPULLBACK')
+    expect(formatStrategyName('DEMOCHANNEL_4H_2')).toBe('DEMOCHANNEL')
+    expect(formatStrategyName('DEMOMACROSS_4H_2')).toBe('DEMOMACROSS')
   })
 
   it('returns SYNC_ option strategies unchanged', () => {
@@ -55,11 +55,11 @@ describe('formatStrategyName', () => {
   })
 
   it('returns snake_case source strategy names unchanged', () => {
-    expect(formatStrategyName('dolphin_trading_v2')).toBe('dolphin_trading_v2')
-    expect(formatStrategyName('cta_ict_v3')).toBe('cta_ict_v3')
+    expect(formatStrategyName('demo_trend_b')).toBe('demo_trend_b')
+    expect(formatStrategyName('demo_trend')).toBe('demo_trend')
   })
 
   it('returns names without a timeframe suffix unchanged', () => {
-    expect(formatStrategyName('VWAPMOM')).toBe('VWAPMOM')
+    expect(formatStrategyName('DEMO_FLOW')).toBe('DEMO_FLOW')
   })
 })

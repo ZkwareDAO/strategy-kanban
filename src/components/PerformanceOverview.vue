@@ -37,14 +37,7 @@
 
       <span class="row-count">{{ strategyList.length }} 条策略</span>
 
-      <!-- 数据源诊断：兼容命中为中性提示（已计入统计），未关联为需处理提示（未计入） -->
-      <span
-        v-if="fallbackCount > 0"
-        class="diag diag-info"
-        :title="`以下仓位的实盘结算币与 manifest 配置不一致，已按 base 币兼容匹配并正常计入统计：\n\n${fallbackTip}`"
-      >
-        <span class="diag-icon">ⓘ</span>{{ fallbackCount }} 项按结算币兼容
-      </span>
+      <!-- 数据源诊断：未关联模式为需处理提示（未计入） -->
       <span
         v-if="unmatchedCount > 0"
         class="diag diag-warn"
@@ -138,9 +131,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
-import { getOrderPositions } from '@/api/performance'
-import { getRuntimesForDateRange } from '@/api/strategy'
-import { buildModeIndex, filterPositionsByModes, resolveModes, dedupePositions, extractStrategyGroup, type SelectableMode, type ModeIndex } from '@/utils/modeFilter'
+import { dataRepository } from '@/data'
+import { loadOrderPositions } from '@/services/livePerformance'
+import { getLatestCatalogDay } from '@/services/catalog'
+import { filterPositionsByTradingMode, type SelectableMode } from '@/utils/modeFilter'
 import { formatStrategyName } from '@/utils/display'
 import { accumulatePnlSplit, initPnlSplit, type PnlSplitBucket } from '@/utils/perfAggregate'
 import { splitRealizedAndOpen, isFuturesPosition } from '@/utils/positionSplit'
@@ -157,7 +151,6 @@ const MODE_OPTIONS: { value: SelectableMode; label: string }[] = [
 const loading = ref(false)
 const error = ref('')
 const rawPositions = ref<OrderPosition[]>([])
-const modeIndex = ref<ModeIndex>({ exact: new Map(), byBase: new Map() })
 // 多选模式：默认全选，至少保留一个；点击已选中的模式会取消（若是最后一个则忽略）
 const selectedModes = ref<Set<SelectableMode>>(new Set(['live', 'smoking']))
 
@@ -172,18 +165,9 @@ function getLastMonday(): Date {
   return monday
 }
 
-function toRfc3339(d: Date): string {
-  return d.toISOString().replace(/\.\d{3}Z$/, 'Z')
-}
-
 function dateToStartOfDay(dateStr: string): Date {
   const [y, m, d] = dateStr.split('-').map(Number)
   return new Date(Date.UTC(y, m - 1, d, 0, 0, 0))
-}
-
-function dateToEndOfDay(dateStr: string): Date {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, d, 23, 59, 59))
 }
 
 const lastMonday = getLastMonday()
@@ -263,19 +247,12 @@ interface StrategyRow extends StrategyPerformance {
 // 结算币回退命中的仓位与精确命中同等计入，仅在 quoteFallbacks 中单独记录。
 const filterResult = computed(() => {
   const futures = rawPositions.value.filter(isFuturesPosition)
-  return filterPositionsByModes(dedupePositions(futures), modeIndex.value, selectedModes.value)
+  // 跨日去重已在 loadOrderPositions 内完成；模式直接取行内 trading_mode
+  return filterPositionsByTradingMode(futures, selectedModes.value)
 })
 
 /** 已实现 / 持仓中拆分：共用 positionSplit 的口径，与每日收益、策略详情一致 */
 const positionSplit = computed(() => splitRealizedAndOpen(filterResult.value.positions))
-
-/** 结算币兼容命中数（已计入统计，仅作数据源不一致提示） */
-const fallbackCount = computed(() => filterResult.value.quoteFallbacks.length)
-const fallbackTip = computed(() =>
-  filterResult.value.quoteFallbacks
-    .map((f) => `${f.strategy} | ${f.asset} → manifest 中为 ${f.matchedSymbol}`)
-    .join('\n'),
-)
 
 /** 完全无法关联模式的仓位数（未计入统计） */
 const unmatchedCount = computed(() => filterResult.value.unmatched.length)
@@ -289,17 +266,16 @@ const strategyList = computed<StrategyRow[]>(() => {
   const groupModes = new Map<string, Set<'live' | 'smoking'>>()
 
   for (const p of positionSplit.value.realized) {
-    const group = extractStrategyGroup(p.strategy_name)
-    // 累计该策略命中的模式
-    const match = resolveModes(p, modeIndex.value)
-    if (match) {
+    const group = p.strategy_name
+    // 累计该策略命中的模式（行内 trading_mode 已经是策略目录级）
+    const mode = p.trading_mode
+    if (mode === 'live' || mode === 'smoking') {
       let gm = groupModes.get(group)
       if (!gm) {
         gm = new Set<'live' | 'smoking'>()
         groupModes.set(group, gm)
       }
-      if (match.modes.has('live')) gm.add('live')
-      if (match.modes.has('smoking')) gm.add('smoking')
+      gm.add(mode)
     }
     const existing = map.get(group)
     if (existing) {
@@ -346,7 +322,7 @@ interface OpenStrategyRow {
  * 持仓中分区的数据源。
  *
  * 包含"该区间内只有持仓中、没有任何已平仓交易"的策略——这类策略此前会整行消失，
- * 与「每日收益」显示的"持仓 N"矛盾（实测 20260812 VWAPMOM_15M_1 即此情况）。
+ * 与「每日收益」显示的"持仓 N"矛盾（实测 20260812 DEMO_FLOW_15M_1 即此情况）。
  * 已在上方已实现区出现的策略，这里仍会列出其未平仓部分，两者笔数不重叠。
  */
 const openStrategyList = computed<OpenStrategyRow[]>(() => {
@@ -356,17 +332,16 @@ const openStrategyList = computed<OpenStrategyRow[]>(() => {
   const groupModes = new Map<string, Set<SelectableMode>>()
 
   for (const p of positionSplit.value.open) {
-    const group = extractStrategyGroup(p.strategy_name)
+    const group = p.strategy_name
 
-    const match = resolveModes(p, modeIndex.value)
-    if (match) {
+    const mode = p.trading_mode
+    if (mode === 'live' || mode === 'smoking') {
       let gm = groupModes.get(group)
       if (!gm) {
         gm = new Set<SelectableMode>()
         groupModes.set(group, gm)
       }
-      if (match.modes.has('live')) gm.add('live')
-      if (match.modes.has('smoking')) gm.add('smoking')
+      gm.add(mode)
     }
 
     const existing = map.get(group)
@@ -391,19 +366,29 @@ const hasNoData = computed(
   () => strategyList.value.length === 0 && openStrategyList.value.length === 0,
 )
 
+/** 默认区间：数据最新一天往前 7 天，而非系统当天 */
+async function initDefaultRange() {
+  if (appStore.performanceRange) return
+  const latest = await getLatestCatalogDay()
+  if (!latest) return
+  const end = new Date(`${latest.iso}T00:00:00Z`)
+  const start = new Date(end.getTime() - 6 * 86400000)
+  const fmt = (date: Date) => date.toISOString().slice(0, 10)
+  dateRange.value = [fmt(start), fmt(end)]
+}
+
 async function fetchData() {
   if (!dateRange.value || dateRange.value.length !== 2) return
   loading.value = true
   error.value = ''
   try {
-    const from = toRfc3339(dateToStartOfDay(dateRange.value[0]))
-    const to = toRfc3339(dateToEndOfDay(dateRange.value[1]))
-    const [positions, runtimes] = await Promise.all([
-      getOrderPositions(from, to),
-      getRuntimesForDateRange(from, to),
-    ])
-    rawPositions.value = positions
-    modeIndex.value = buildModeIndex(runtimes)
+    const fromDay = dateRange.value[0].replace(/-/g, '')
+    const toDay = dateRange.value[1].replace(/-/g, '')
+    const catalog = await dataRepository.getCatalog()
+    const days = catalog.filter(
+      (day) => day.day >= fromDay && day.day <= toDay && day.hasLive,
+    )
+    rawPositions.value = await loadOrderPositions(days)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -458,7 +443,10 @@ function pnlClass(v: number): string {
   return v > 0 ? 'val-positive' : v < 0 ? 'val-negative' : ''
 }
 
-onMounted(fetchData)
+onMounted(async () => {
+  await initDefaultRange()
+  fetchData()
+})
 </script>
 
 <style scoped lang="scss">

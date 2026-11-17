@@ -30,6 +30,9 @@ public/backtest-output
 public/backtest-output-index.json
 public/replay-index.json
 public/frontend-data
+public/frontend-data-v2
+public/frontend-data-v2-*
+public/kline-data-v2
 
 # Generated sample data (npm run sample-data)
 # 前导 / 锚定仓库根目录，否则会连带忽略 scripts/sample-data/ 源码

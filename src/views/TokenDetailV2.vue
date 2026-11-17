@@ -11,10 +11,9 @@
         <h2>{{ strategy }} / {{ symbol }}</h2>
         <p>
           日期范围: {{ dateRange?.[0] }} ~ {{ dateRange?.[1] }}
-          <span v-if="runtimeName"> | 运行实例: {{ runtimeName }}</span>
-          <span v-else class="muted"> | 纯K线模式（无仓位叠加）</span>
+          <span v-if="dirName" class="muted"> | 策略目录: {{ dirName }}</span>
         </p>
-        <el-tag :type="modeTagType">{{ modeLabel }}</el-tag>
+        <el-tag v-if="modeLabel" :type="modeTagType">{{ modeLabel }}</el-tag>
       </div>
 
       <!-- Strategy Logic Inline -->
@@ -25,15 +24,9 @@
         </div>
         <div v-show="logicExpanded" class="logic-content-inline">
           <div class="logic-section-inline">
-            <div class="logic-title-inline">【开仓条件】</div>
+            <div class="logic-title-inline">【开仓】</div>
             <ul>
               <li v-for="(rule, idx) in strategyLogic.entry_conditions.rules" :key="idx">{{ rule }}</li>
-            </ul>
-          </div>
-          <div class="logic-section-inline">
-            <div class="logic-title-inline">【平仓条件】</div>
-            <ul>
-              <li v-for="(rule, idx) in strategyLogic.exit_conditions.rules" :key="idx">{{ rule }}</li>
             </ul>
           </div>
           <div class="logic-section-inline">
@@ -65,14 +58,14 @@
       <div class="chart-controls">
         <div class="backplay-toggle">
           <label class="checkbox-label">
-            <input type="checkbox" v-model="showBackplay" :disabled="!dirName" />
-            <span>回放对比</span>
+            <input type="checkbox" v-model="showLiveSignals" :disabled="!dirName" />
+            <span>实盘信号 ({{ liveSignals.length }})</span>
           </label>
-          <span v-if="backplayLoading" class="backplay-status">加载中...</span>
-          <span v-else-if="backplayTrades.length === 0 && showBackplay" class="backplay-status">无回放数据</span>
-          <span v-else-if="backplayTrades.length > 0" class="backplay-status success">
-            {{ backplayTrades.length }} 条回放信号
-          </span>
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="showBacktestSignals" :disabled="!dirName" />
+            <span>回放信号 ({{ backtestSignals.length }})</span>
+          </label>
+          <span v-if="signalsLoading" class="backplay-status">加载中...</span>
         </div>
         <IndicatorPanel v-model="selectedIndicators" :strategy="strategyPrefix" />
       </div>
@@ -90,7 +83,7 @@
         :symbol="symbol"
         :indicators="selectedIndicators"
         :display-count="effectiveDisplayCount"
-        :backplay-signals="showBackplay ? backplaySignals : undefined"
+        :signals="chartSignals"
         @entry-click="handleEntryClick"
         @exit-click="handleExitClick"
         @bar-click="handleBarClick"
@@ -100,7 +93,7 @@
       <el-dialog v-model="entryDialogVisible" :title="entryDialogTitle" width="90%" top="5vh">
         <PriceRoiChart
           v-if="entryDialogVisible"
-          :timeline-data="mergedKline"
+          :timeline-data="processedKlineData"
           :highlight-position-id="highlightPositionId"
         />
       </el-dialog>
@@ -114,40 +107,34 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { getPositions, getBacktestTrades, getComparison } from '@/api/strategy'
-import { getKlineV2 } from '@/api/klineV2'
-import { getWarmupKline } from '@/api/klineWarmup'
-import { usePositionOverlay, toDatedPositions } from '@/composables/usePositionOverlay'
-import { resampleKline, getDefaultDisplayCount } from '@/utils/resample'
+import { dataRepository } from '@/data'
+import { getLatestCatalogDay } from '@/services/catalog'
+import { klineService } from '@/services/kline'
+import { loadLivePositions, toChartPosition } from '@/services/livePerformance'
+import { mergePositionsByTime } from '@/utils/klineV2'
+import { getDefaultDisplayCount, timeframeMinutes } from '@/utils/resample'
 import { enumerateDates } from '@/utils/klineRange'
 import type { RawKlinePoint } from '@/models/klineV2'
 import type { KlinePoint, TimeframeValue } from '@/models/kline'
 import type { DatedPosition } from '@/utils/klineV2'
 import { warmupBarsFor, type IndicatorType } from '@/indicators'
-import type { BacktestSignal } from '@/models/backtest'
+import type { ChartSignalPoint, Signal, SignalComparison } from '@/models/detail'
+import type { SignalComparisonRow, SignalRow, StrategyMetaV2 } from '@/models/dataset'
 import TechnicalChart from '@/components/detail/TechnicalChart.vue'
 import IndicatorPanel from '@/components/detail/IndicatorPanel.vue'
 import TimeframeSelector from '@/components/detail/TimeframeSelector.vue'
 import PriceRoiChart from '@/components/detail/PriceRoiChart.vue'
 import ComparisonReport from '@/components/detail/ComparisonReport.vue'
-import type { SignalComparison, StrategyLogic as StrategyLogicType } from '@/models/detail'
-import { getStrategyMeta, loadStrategyMeta, strategyMeta, type StrategyMeta } from '@/api/strategyMeta'
+import type { StrategyLogic as StrategyLogicType } from '@/models/detail'
+import { getStrategyMeta, setStrategyMeta, strategyMeta, type StrategyMeta } from '@/api/strategyMeta'
 
 const props = defineProps<{ strategy: string; symbol: string }>()
 const route = useRoute()
 
-/** 运行实例名（可选）。存在则按日叠加仓位；缺失则为纯K线模式 */
-const runtimeName = computed(() => (route.query.runtime as string) ?? '')
-/** frontend_data 下的策略目录名（如 DOLPHINV2_4H_2），从 query.dir 读取 */
-const dirName = computed(() => (route.query.dir as string) ?? '')
+/** frontend_data 下的策略目录名；缺失时回退为路由参数 */
+const dirName = computed(() => (route.query.dir as string) || props.strategy)
 
-const tradingMode = computed(() => {
-  const name = (runtimeName.value || '').toUpperCase()
-  if (name.includes('_LIVE') || name.endsWith('LIVE')) return 'live'
-  if (name.includes('_PAPER') || name.endsWith('PAPER')) return 'paper_trading'
-  if (name.includes('_SMOKING') || name.endsWith('SMOKING')) return 'smoking'
-  return ''
-})
+const tradingMode = ref<'' | 'live' | 'paper_trading' | 'smoking'>('')
 
 const modeLabel = computed(() => {
   const map: Record<string, string> = {
@@ -190,9 +177,11 @@ const initialTf: TimeframeValue = (VALID_TFS as string[]).includes(tfQuery)
 const selectedTimeframe = ref<TimeframeValue>(initialTf)
 const displayCount = ref(100)
 
-const showBackplay = ref(false)
-const backplayLoading = ref(false)
-const backplayTrades = ref<BacktestSignal[]>([])
+const showLiveSignals = ref(true)
+const showBacktestSignals = ref(false)
+const signalsLoading = ref(false)
+const liveSignals = ref<ChartSignalPoint[]>([])
+const backtestSignals = ref<ChartSignalPoint[]>([])
 
 const entryDialogVisible = ref(false)
 const entryDialogTitle = ref('')
@@ -206,7 +195,7 @@ const strategyConfig = computed<StrategyMeta | null>(() => {
   void strategyMeta.value
   return getStrategyMeta(props.strategy)
 })
-const strategyPrefix = computed(() => props.strategy)
+const strategyPrefix = computed(() => dirName.value)
 const strategyLogic = computed<StrategyLogicType>(() => {
   const logic = strategyConfig.value?.logic
   if (logic) {
@@ -250,12 +239,11 @@ function initialDateRange(): [string, string] {
 }
 const dateRange = ref<[string, string] | null>(initialDateRange())
 
-// ---- 仓位 overlay 与重采样（复用 v1 resampleKline，输入为 v1 形状 KlinePoint[]）----
-const { merged: mergedKline } = usePositionOverlay(rawKline, datedPositions)
-
+// ---- 仓位 overlay：业务段已是对应周期 bar，按时间区间定位开平仓 ----
 const processedKlineData = computed<KlinePoint[]>(() => {
-  if (mergedKline.value.length === 0) return []
-  return resampleKline(mergedKline.value, selectedTimeframe.value)
+  if (rawKline.value.length === 0) return []
+  const intervalSeconds = timeframeMinutes(selectedTimeframe.value) * 60
+  return mergePositionsByTime(rawKline.value, datedPositions.value, intervalSeconds)
 })
 
 /**
@@ -350,7 +338,10 @@ const warmupWarning = computed(() => {
   return null
 })
 
-const backplaySignals = computed(() => backplayTrades.value)
+const chartSignals = computed<ChartSignalPoint[]>(() => [
+  ...(showLiveSignals.value ? liveSignals.value : []),
+  ...(showBacktestSignals.value ? backtestSignals.value : []),
+])
 
 watch(selectedTimeframe, (tf) => {
   displayCount.value = getDefaultDisplayCount(tf)
@@ -390,55 +381,187 @@ function handleBarClick(bar: { datetime: string; open: number; high: number; low
 // ---- 数据加载 ----
 async function fetchPositionsForRange(dates: string[]): Promise<DatedPosition[]> {
   if (!dirName.value || dates.length === 0) return []
-  const results = await Promise.all(
-    dates.map(async (iso) => {
-      try {
-        const positions = await getPositions(dirName.value, props.symbol, isoToYyyymmdd(iso))
-        return toDatedPositions(positions, iso)
-      } catch {
-        return [] as DatedPosition[]
-      }
-    }),
-  )
-  return results.flat()
+  const days = dates.map((iso) => ({
+    day: isoToYyyymmdd(iso),
+    strategies: [dirName.value],
+    hasLive: true,
+    hasBacktest: true,
+    updatedAt: '',
+  }))
+  // 策略级 live_positions.csv，跨日按 position_id 去重（CLOSED 优先）
+  const rows = await loadLivePositions(days, { symbol: props.symbol })
+  return rows.map((row) => {
+    const positionDate =
+      (row.entryTime || row.exitTime || '').slice(0, 10) ||
+      (row.day ? yyyymmddToIso(row.day) : dates[0])
+    return { ...toChartPosition(row), date: positionDate }
+  })
 }
 
-/** 获取日期范围内第一个可用的 comparison.json */
-async function fetchComparisonForRange(dates: string[]): Promise<void> {
-  if (!dirName.value) return
-  for (const iso of dates) {
-    try {
-      const data = await getComparison(dirName.value, props.symbol, isoToYyyymmdd(iso))
-      comparisonData.value = data
-      return
-    } catch {
-      // try next date
+function actionOf(row: { action: 'open' | 'close'; direction: 'long' | 'short' }): Signal['action'] {
+  if (row.action === 'open') return row.direction === 'long' ? 'buy' : 'sell'
+  return row.direction === 'long' ? 'sell_close' : 'buy_close'
+}
+
+function toChartSignal(
+  row: SignalRow,
+  source: 'live' | 'backtest',
+  statusMap: Map<string, string>,
+): ChartSignalPoint {
+  return {
+    time: row.signalTime.replace('T', ' ').slice(0, 19),
+    price: row.price,
+    side: row.side,
+    action: row.action,
+    direction: row.direction,
+    source,
+    reason: row.reason,
+    status: statusMap.get(row.signalId),
+  }
+}
+
+function dedupeSignals(rows: SignalRow[]): SignalRow[] {
+  const map = new Map<string, SignalRow>()
+  for (const row of rows) {
+    const key = row.signalId || `${row.symbol}|${row.signalTime}|${row.side}|${row.action}`
+    if (!map.has(key)) map.set(key, row)
+  }
+  return [...map.values()]
+}
+
+function registerMeta(meta: StrategyMetaV2): void {
+  const logic = meta.logic as { entry?: unknown; exit?: unknown; risk?: unknown }
+  const strings = (value: unknown): string[] | undefined =>
+    Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string')
+      : undefined
+  setStrategyMeta(dirName.value, {
+    display_name: meta.displayName,
+    description: meta.description,
+    indicators: meta.indicators,
+    indicator_params: meta.indicatorParams as unknown as StrategyMeta['indicator_params'],
+    logic: {
+      entry: strings(logic.entry),
+      exit: strings(logic.exit),
+      risk: strings(logic.risk),
+    },
+  })
+}
+
+/** signal_comparison.csv → 旧 ComparisonReport 需要的数据结构 */
+function buildComparison(
+  rows: SignalComparisonRow[],
+  liveMap: Map<string, SignalRow>,
+  backtestMap: Map<string, SignalRow>,
+): SignalComparison | undefined {
+  if (rows.length === 0) return undefined
+  const matched = rows.filter((row) => row.recordType === 'matched')
+  const unmatchedLive = rows.filter((row) => row.recordType === 'unmatched_live')
+  const unmatchedBacktest = rows.filter((row) => row.recordType === 'unmatched_backtest')
+
+  const toSignal = (row: (typeof rows)[number], side: 'live' | 'backtest'): Signal => {
+    const id = side === 'live' ? row.liveSignalId : row.backtestSignalId
+    const signal = (side === 'live' ? liveMap : backtestMap).get(id)
+    const time = side === 'live' ? row.liveTime : row.backtestTime
+    return {
+      signal_id: id || undefined,
+      live_signal_id: row.liveSignalId || undefined,
+      backtest_signal_id: row.backtestSignalId || undefined,
+      time: time || undefined,
+      side: row.signalSide === 'sell' || signal?.side === 'SELL' ? 'sell' : 'buy',
+      action: signal
+        ? actionOf(signal)
+        : row.signalAction === 'close'
+          ? 'sell_close'
+          : row.signalSide === 'sell'
+            ? 'sell'
+            : 'buy',
+      reason: signal?.reason,
+      live_price: row.livePrice ?? signal?.price,
+      backtest_price: row.backtestPrice ?? signal?.price,
+      match_type: row.matchType,
+      time_diff_seconds: row.timeDiffSeconds ?? undefined,
+      price_diff_pct: row.priceDiffPct ?? undefined,
     }
   }
-  comparisonData.value = undefined
+
+  const compared =
+    matched.length + unmatchedLive.length + unmatchedBacktest.length
+  return {
+    strategy: dirName.value,
+    symbol: props.symbol,
+    date: dateRange.value?.[0] ?? '',
+    total_live: liveMap.size,
+    total_backtest: backtestMap.size,
+    matched: matched.length,
+    accuracy_score: compared > 0 ? matched.length / compared : 0,
+    unmatched_live: unmatchedLive.map((row) => toSignal(row, 'live')),
+    unmatched_backtest: unmatchedBacktest.map((row) => toSignal(row, 'backtest')),
+    matched_signals: matched.map((row) => ({
+      ...toSignal(row, 'live'),
+      match_type: row.matchType || 'matched',
+    })),
+  }
 }
 
-/**
- * 加载指标预热段：业务区间之前的历史 bar，只参与指标计算不参与显示。
- *
- * 根数由当前所选指标决定（取各指标 warmupBars 的最大值），因此切换周期或
- * 增减指标都需重新取；失败不阻断页面——最坏退化为修复前的行为（开头缺指标），
- * 并由 [[warmupWarning]] 提示。
- */
-async function fetchWarmup(startDate: string): Promise<void> {
-  const params = getStrategyMeta(props.strategy)?.indicator_params
-  const bars = warmupBarsFor(selectedIndicators.value, params)
-  warmupNeeded.value = bars
-  if (bars === 0) {
-    warmupKline.value = []
-    warmupLastDate.value = null
-    warmupTruncated.value = false
-    return
+interface RangeSignals {
+  live: ChartSignalPoint[]
+  backtest: ChartSignalPoint[]
+  comparison?: SignalComparison
+  mode: '' | 'live' | 'paper_trading' | 'smoking'
+}
+
+/** 跨日读取实盘/回放信号、对比结果与策略元数据 */
+async function fetchSignalsForRange(dates: string[]): Promise<RangeSignals> {
+  const empty: RangeSignals = { live: [], backtest: [], mode: '' }
+  if (!dirName.value || dates.length === 0) return empty
+  signalsLoading.value = true
+  try {
+    const perDay = await Promise.all(
+      dates.map(async (iso) => {
+        const day = isoToYyyymmdd(iso)
+        const [liveRows, backtestRows, comparisonRows, meta] = await Promise.all([
+          dataRepository.getLiveSignals(day, dirName.value, props.symbol),
+          dataRepository.getBacktestSignals(day, dirName.value, {
+            symbol: props.symbol,
+            latestOnly: true,
+          }),
+          dataRepository.getSignalComparison(day, dirName.value, props.symbol),
+          dataRepository.getStrategyMeta(day, dirName.value),
+        ])
+        if (meta) registerMeta(meta)
+        return { liveRows, backtestRows, comparisonRows }
+      }),
+    )
+
+    const liveRows = dedupeSignals(perDay.flatMap((day) => day.liveRows))
+    const backtestRows = dedupeSignals(perDay.flatMap((day) => day.backtestRows))
+    const comparisonRows = perDay.flatMap((day) => day.comparisonRows)
+
+    const statusMap = new Map<string, string>()
+    for (const row of comparisonRows) {
+      const status = row.recordType === 'matched' ? 'matched' : 'missed'
+      if (row.liveSignalId) statusMap.set(row.liveSignalId, status)
+      if (row.backtestSignalId) statusMap.set(row.backtestSignalId, status)
+    }
+
+    const liveMap = new Map(liveRows.map((row) => [row.signalId, row]))
+    const backtestMap = new Map(backtestRows.map((row) => [row.signalId, row]))
+    const first = liveRows[0] ?? backtestRows[0]
+    const mode =
+      first && (first.tradingMode === 'live' || first.tradingMode === 'paper_trading' || first.tradingMode === 'smoking')
+        ? first.tradingMode
+        : ''
+
+    return {
+      live: liveRows.map((row) => toChartSignal(row, 'live', statusMap)),
+      backtest: backtestRows.map((row) => toChartSignal(row, 'backtest', statusMap)),
+      comparison: buildComparison(comparisonRows, liveMap, backtestMap),
+      mode,
+    }
+  } finally {
+    signalsLoading.value = false
   }
-  const result = await getWarmupKline(props.symbol, selectedTimeframe.value, bars, startDate)
-  warmupKline.value = result.bars
-  warmupLastDate.value = result.lastDate
-  warmupTruncated.value = result.truncated
 }
 
 async function fetchData() {
@@ -453,88 +576,58 @@ async function fetchData() {
   comparisonData.value = undefined
   try {
     const dates = enumerateDates(start, end)
-    // 预热段与业务数据并行；预热失败不影响主流程（catch 内清空即可）
-    const [kline, positions] = await Promise.all([
-      getKlineV2(props.symbol, start, end),
+    const bars = warmupBarsFor(
+      selectedIndicators.value,
+      getStrategyMeta(dirName.value)?.indicator_params,
+    )
+    warmupNeeded.value = bars
+
+    // 一次取预热+业务；仓位与信号并行加载
+    const [series, positions, signals] = await Promise.all([
+      klineService.getSeriesWithWarmup(
+        props.symbol,
+        selectedTimeframe.value,
+        bars,
+        start,
+        end,
+      ),
       fetchPositionsForRange(dates),
-      fetchWarmup(start).catch(() => {
-        warmupKline.value = []
-        warmupLastDate.value = null
-        warmupTruncated.value = true
-      }),
+      fetchSignalsForRange(dates),
     ])
-    rawKline.value = kline
+
+    rawKline.value = series.business
+    warmupKline.value = series.warmup
+    warmupLastDate.value = series.warmup.length
+      ? series.warmup[series.warmup.length - 1].datetime.slice(0, 10)
+      : null
+    warmupTruncated.value = series.truncated
     datedPositions.value = positions
-    // 对比数据取日期范围内第一个可用的
-    fetchComparisonForRange(dates)
+    liveSignals.value = signals.live
+    backtestSignals.value = signals.backtest
+    comparisonData.value = signals.comparison
+    tradingMode.value = signals.mode
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载失败'
     rawKline.value = []
     datedPositions.value = []
     warmupKline.value = []
+    liveSignals.value = []
+    backtestSignals.value = []
   } finally {
     loading.value = false
   }
 }
 
-async function fetchBackplayData() {
-  if (!dateRange.value) return
-  backplayLoading.value = true
-  try {
-    if (!dirName.value) {
-      backplayTrades.value = []
-      return
-    }
-    const dates = enumerateDates(dateRange.value[0], dateRange.value[1])
-    const tradesPerDay = await Promise.all(
-      dates.map((iso) =>
-        getBacktestTrades(isoToYyyymmdd(iso), dirName.value, props.symbol).catch(() => []),
-      ),
-    )
-    const signals: BacktestSignal[] = []
-    for (const trade of tradesPerDay.flat()) {
-      const isLong = trade.side === 'BUY' || trade.side === 'BUY_CLOSE'
-      const isOpen = trade.side === 'BUY' || trade.side === 'SELL'
-      const datetime = trade.timestamp.replace('T', ' ').substring(0, 19)
-      signals.push({
-        datetime,
-        price: trade.price,
-        position_type: isLong ? 'long' : 'short',
-        action: isOpen ? 'open' : 'close',
-      })
-    }
-    backplayTrades.value = signals
-  } catch (err) {
-    console.error('[v2] backplay failed:', err)
-    backplayTrades.value = []
-  } finally {
-    backplayLoading.value = false
-  }
-}
-
 function onDateRangeChange() {
-  // 日期范围变化后清空回放缓存并重新加载K线/仓位
-  backplayTrades.value = []
   fetchData()
 }
 
-watch(showBackplay, (v) => {
-  if (v && backplayTrades.value.length === 0) fetchBackplayData()
-})
-
 /**
- * 周期或指标变化会改变所需预热根数（如切到更大周期、或勾上长窗口指标），
- * 需重新取预热段。只重取预热，不动业务数据——业务区间未变。
+ * 周期或指标变化都会改变 K 线聚合与预热根数，直接重新加载（结果有缓存）。
  */
 watch([selectedTimeframe, selectedIndicators], () => {
-  const start = dateRange.value?.[0]
-  if (!start || loading.value) return
-  fetchWarmup(start).catch(() => {
-    warmupKline.value = []
-    warmupLastDate.value = null
-    warmupTruncated.value = true
-  })
-}, { deep: true })
+  if (!loading.value) fetchData()
+})
 
 // 弹窗打开后触发 resize，让 ECharts 正确计算尺寸
 watch(entryDialogVisible, (visible) => {
@@ -543,9 +636,15 @@ watch(entryDialogVisible, (visible) => {
   }
 })
 
-onMounted(() => {
-  // 策略元数据与业务数据并行加载，失败不影响页面（内部已兜底）
-  loadStrategyMeta()
+async function initDefaultDate() {
+  // 直接打开（无日期参数）时对齐数据最新一天
+  if (route.query.from || route.query.to || route.query.date) return
+  const latest = await getLatestCatalogDay()
+  if (latest) dateRange.value = [latest.iso, latest.iso]
+}
+
+onMounted(async () => {
+  await initDefaultDate()
   fetchData()
 })
 </script>

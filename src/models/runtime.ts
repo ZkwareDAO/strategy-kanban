@@ -9,54 +9,23 @@ export type TradingMode = 'live' | 'paper_trading' | 'smoking' | 'unknown'
 export type RuntimeStatus = 'success' | 'failed' | 'unknown'
 
 /**
- * 实际数据目录前缀 → 策略名 映射
- */
-export const PREFIX_STRATEGY_MAP: Record<string, string> = {
-  'ICT': 'cta_ict_v4',
-  'RBREAKER': 'cta_rbreaker_v3',
-  'DOLPHIN': 'dolphin_trading_v2',
-  'DOLPHINV2': 'dolphin_trading_v2',
-  'OBVATR': 'obv_atr_v2',
-  'NEWDOLPHIN': 'new_dolphin',
-  'NEWOBV': 'new_obv',
-  'ERP': 'ema_rsi_pullback',
-  'RDATR': 'regime_donchian_atr',
-  'VWAPMOM': 'vwap_channel_momentum',
-  'SAR_SNT3_V3': 'sar_snt3_v3',
-}
-
-/**
- * 从 runtime_name 提取显示用的策略短名
- * 例如: VWAPMOM_15M_1_XLMUSDT_SMOKING → VWAPMOM
- *       DOLPHINV2_4H_2_BTCUSDT_LIVE → DOLPHINV2
- */
-export function extractDisplayPrefix(runtimeName: string): string {
-  for (const prefix of Object.keys(PREFIX_STRATEGY_MAP)) {
-    if (runtimeName.startsWith(prefix + '_')) {
-      return prefix
-    }
-  }
-  return runtimeName.split('_')[0]
-}
-
-/**
  * 策略运行实例
  * @example
  * const runtime: Runtime = {
- *   runtime_name: 'DOLPHINV2_4H_2_BTCUSDT_LIVE',
- *   dir_name: 'DOLPHINV2_4H_2',
- *   strategy: 'dolphin_trading_v2',
+ *   runtime_name: 'DEMO_TREND_B_4H_2_BTCUSDT_LIVE',
+ *   dir_name: 'DEMO_TREND_B_4H_2',
+ *   strategy: 'demo_trend_b',
  *   symbol: 'BTCUSDT',
  *   trading_mode: 'live',
  *   status: 'success'
  * }
  */
 export interface Runtime {
-  /** 运行实例名称，如: DOLPHINV2_4H_2_BTCUSDT_LIVE */
+  /** 运行实例名称，如: DEMO_TREND_B_4H_2_BTCUSDT_LIVE */
   runtime_name: string
-  /** frontend_data 下的策略目录名（如 DOLPHINV2_4H_2） */
+  /** frontend_data 下的策略目录名（如 DEMO_TREND_B_4H_2） */
   dir_name: string
-  /** 策略内部名（source_strategy），如: dolphin_trading_v2 */
+  /** 策略内部名（source_strategy），如: demo_trend_b */
   strategy: string
   /** 交易对，如: BTCUSDT */
   symbol: string
@@ -64,7 +33,7 @@ export interface Runtime {
   trading_mode: TradingMode
   /** 运行状态 */
   status: RuntimeStatus
-  /** 显示用策略短名，如: DOLPHINV2 */
+  /** 显示用策略短名，如: DEMO_TREND_B */
   display_name: string
 }
 

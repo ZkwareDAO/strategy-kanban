@@ -1,0 +1,23 @@
+{
+  "data": {
+    "frontendBaseUrl": "/frontend-data",
+    "klineBaseUrl": "/kline-data"
+  },
+  "kline": {
+    "basePeriod": "1m",
+    "preferAggregate": true,
+    "defaultTimeframe": "5m",
+    "maxWarmupDays": 120,
+    "cacheEntries": 8
+  },
+  "paths": {
+    "catalog": "catalog.csv",
+    "dayManifest": "{day}/manifest.csv",
+    "dayRuns": "{day}/backtest_runs.csv",
+    "strategyDir": "{day}/{strategy}",
+    "backtestResultsDir": "{day}/{strategy}/backtest_results/{runStamp}",
+    "discoveryRuns": "discovery/runs.csv",
+    "discoveryResultsDir": "discovery/{strategy}/backtest_results/{runStamp}",
+    "overrides": {}
+  }
+}

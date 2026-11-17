@@ -18,15 +18,41 @@ git clone <repo-url> strategy-kanban
 cd strategy-kanban
 npm install
 
-# 建立数据目录（可以是真实目录，也可以是指向你的数据目录的符号链接）
-ln -s /path/to/your-data/frontend-data   public/frontend-data     # 策略、持仓、对比（必需）
-ln -s /path/to/your-data/kline           public/kline-data        # K线行情（必需）
-ln -s /path/to/your-data/backtest_output public/backtest-output   # 历史回测（可选，策略发现页）
+# 建立数据目录（可以是复制进来的真实目录，也可以是指向数据目录的符号链接）
+ln -s /path/to/your-data/frontend-data public/frontend-data   # 策略、持仓、信号、回测（必需）
+ln -s /path/to/your-data/kline-data    public/kline-data      # K线行情（必需）
 ```
 
-> 这些目录均在 `vite.config.ts` 的 `server.watch.ignored` 中，并设置了
+`datasource.config.json` 是**可提交的通用默认配置**（默认 `/frontend-data`、`/kline-data`）。
+本机真实路径不要改这个文件，统一写入已忽略的 `.env.local`：
+
+```bash
+# .env.local（不提交）
+DATA_ROOT=/path/to/data
+VITE_DATA_FRONTEND_BASE_URL=/frontend-data-v2
+VITE_DATA_KLINE_BASE_URL=/kline-data-v2
+```
+
+软链名可以是 `frontend-data-v2` 等自定义名称，只要与 `VITE_DATA_FRONTEND_BASE_URL` 一致。
+
+> 这些目录应加入 `vite.config.ts` 的 `server.watch.ignored`，并保持
 > `followSymlinks: false`，避免 Vite 监听大体量数据耗尽 inotify（`ENOSPC`）。
 > 这只影响文件监听，不影响静态文件 serving。
+
+### 大文件 K 线（可选）
+
+Vite 静态服务对大 CSV 的 HTTP Range 支持不完整；`1m` K 线较大时，二分读取会退化为
+整文件加载。需要完整的逐字节 Range 时，额外启动只读数据服务：
+
+```bash
+# 终端 1
+DATA_ROOT=/path/to/data npm run dev:data   # 默认 127.0.0.1:3001
+# 终端 2
+npm run dev
+```
+
+Vite 通过 `/kline-data-v2` 代理到该服务。生产环境对应 Nginx/CDN 的 Range 支持，
+不需要该脚本。
 
 各目录的字段规范与最小可运行配置见 [DATA-SPEC.md](DATA-SPEC.md) 与 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
@@ -39,9 +65,9 @@ npm run sample-data
 npm run dev
 ```
 
-数据全部由程序合成，日期跟随运行当天，因此永远落在各页面的默认日期窗口内。
-若 `public/` 下已有指向真实数据的符号链接，脚本会跳过不覆盖。
-生成器本身的说明见 [DATA-SPEC.md 的「参考实现」一节](DATA-SPEC.md)。
+数据全部由程序合成，日期跟随运行当天。脚本默认链接到 `public/frontend-data` 与
+`public/kline-data`；若这些路径已被真实数据占用会跳过不覆盖。使用自定义数据 URL 时，
+需要把 `datasource.config.json` 临时切回上述默认名称，或手动把示例目录链到当前配置名。
 
 ## 可用命令
 
@@ -49,6 +75,7 @@ npm run dev
 | 命令 | 说明 |
 |------|------|
 | `npm run dev` | 启动开发服务器（默认端口 3000，局域网用 `-- --host`） |
+| `npm run dev:data` | 启动只读静态数据服务（Range/CORS，默认 `127.0.0.1:3001`，供大 K 线使用） |
 | `npm run build` | `vue-tsc -b` 类型检查 + `vite build` 生产构建（产物在 `dist/`） |
 | `npm run preview` | 预览生产构建 |
 | `npm run sample-data` | 生成示例数据（虚拟数据，用于无真实数据时起步） |
@@ -57,6 +84,21 @@ npm run dev
 | `npm run test:coverage` | 运行单元测试并生成覆盖率报告 |
 | `npm run type-check` | `vue-tsc --noEmit` 类型检查（不产出文件） |
 <!-- /AUTO-GENERATED:scripts -->
+
+## 配置与环境变量
+
+数据源主配置在 `datasource.config.json`（`data` / `kline` / `paths`）。
+以下环境变量优先级高于 JSON：
+
+<!-- AUTO-GENERATED:env -->
+| 变量 | 必需 | 说明 | 示例 |
+|------|------|------|------|
+| `VITE_DATA_FRONTEND_BASE_URL` | 否 | 覆盖 `data.frontendBaseUrl` | `https://data.example.com/frontend-data` |
+| `VITE_DATA_KLINE_BASE_URL` | 否 | 覆盖 `data.klineBaseUrl` | `https://data.example.com/kline-data` |
+| `VITE_DATA_SERVER` | 否 | `dev:data` 代理目标 | `http://127.0.0.1:3001` |
+| `VITE_API_POSITION_TARGET` | 否 | 遗留 `/api/position` 代理目标 | `https://api.example.com` |
+| `VITE_API_POSITION_PREFIX` | 否 | 遗留代理路径前缀 | `/api/position` |
+<!-- /AUTO-GENERATED:env -->
 
 ## 测试
 
@@ -106,9 +148,13 @@ test('returns empty array when no markets match query', () => {
 
 | 路径 | 页面 |
 |------|------|
-| `/` | `StrategyOverview`（策略表格 / 回测详情 tab） |
-| `/detail/:strategy/:symbol` | `TokenDetail`（V1） |
-| `/detail-v2/:strategy/:symbol` | `TokenDetailV2`（数据分离版） |
+| `/` | `StrategyOverview`（每日收益 / 每日回放 / 区间统计 / 策略发现 tab） |
+| `/detail/:strategy/:symbol` | `TokenDetail`（V1，遗留） |
+| `/detail-v2/:strategy/:symbol` | `TokenDetailV2`（v2 K 线技术指标页） |
+| `/backtest-detail/:strategy/:symbol` | `BacktestDetail`（回测结果 + `daily_equity`） |
+| `/performance-detail/:strategyName` | `PerformanceDetail`（区间统计下钻） |
+| `/backtest-token-list` | `BacktestTokenList`（策略发现标的列表） |
+| `/replay-token-list` | `ReplayTokenList`（每日回放标的列表） |
 
 详见 [README.md](../README.md)、[DATA-SPEC.md](DATA-SPEC.md) 与 [RUNBOOK.md](RUNBOOK.md)。
 

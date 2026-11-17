@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseKlineRaw, filterKlineByDateRange, mergePositions, extractHm } from '@/utils/klineV2'
+import { parseKlineRaw, filterKlineByDateRange, mergePositions, mergePositionsByTime, extractHm } from '@/utils/klineV2'
 import type { DatedPosition } from '@/utils/klineV2'
 import type { RawKlinePoint } from '@/models/klineV2'
 
@@ -217,6 +217,60 @@ describe('klineV2 utils', () => {
       ]
       const merged = mergePositions(kline, positions)
       expect(merged.every(p => p.is_entry === false)).toBe(true)
+    })
+  })
+
+  describe('mergePositionsByTime', () => {
+    const dayStart = Math.floor(Date.parse('2026-10-22T00:00:00Z') / 1000)
+    const bars: RawKlinePoint[] = [
+      { timestamp: dayStart, datetime: '2026-10-22 00:00:00', open: 100, high: 101, low: 99, close: 100 },
+      { timestamp: dayStart + 14400, datetime: '2026-10-22 04:00:00', open: 100, high: 105, low: 100, close: 104 },
+      { timestamp: dayStart + 28800, datetime: '2026-10-22 08:00:00', open: 104, high: 106, low: 103, close: 105 },
+    ]
+
+    it('marks the bars containing entry and exit times', () => {
+      const positions: DatedPosition[] = [
+        {
+          position_id: 'p1', type: 'long',
+          entry_time: '2026-10-22T00:15:00+00:00',
+          exit_time: '2026-10-22T05:11:00+00:00',
+          entry_price: 100, exit_price: 104,
+          realized_pnl: 2, max_potential_pnl: 3, max_drawdown: -0.5,
+          date: '2026-10-22',
+        },
+      ]
+
+      const merged = mergePositionsByTime(bars, positions, 4 * 3600)
+
+      expect(merged[0].is_entry).toBe(true)
+      expect(merged[0].entries?.[0].position_id).toBe('p1')
+      expect(merged[1].is_exit).toBe(true)
+      expect(merged[1].exits?.[0].position_id).toBe('p1')
+      expect(merged[2].is_entry).toBe(false)
+    })
+
+    it('supports a position whose exit falls on the next day', () => {
+      const positions: DatedPosition[] = [
+        {
+          position_id: 'p2', type: 'short',
+          entry_time: '2026-10-21T22:00:00+00:00',
+          exit_time: '2026-10-22T05:00:00+00:00',
+          entry_price: 100, exit_price: 95,
+          realized_pnl: 1, max_potential_pnl: 2, max_drawdown: 0,
+          date: '2026-10-21',
+        },
+      ]
+
+      const merged = mergePositionsByTime(bars, positions, 4 * 3600)
+
+      // 开仓早于区间起点：不在第一根 bar 上伪造开仓标记
+      expect(merged[0].is_entry).toBe(false)
+      expect(merged[1].is_exit).toBe(true)
+    })
+
+    it('leaves bars neutral with no positions', () => {
+      const merged = mergePositionsByTime(bars, [], 4 * 3600)
+      expect(merged.every(p => !p.is_entry && !p.is_exit)).toBe(true)
     })
   })
 })

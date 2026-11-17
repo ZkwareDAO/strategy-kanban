@@ -1,14 +1,9 @@
 /**
- * 策略与持仓数据根路径
+ * 策略与仓位数据根路径。
  *
- * `public/frontend-data` 可以是真实目录，也可以是指向外部数据目录的符号链接。
- * 数据由使用方自行准备，需包含：
- *   - {date}/manifest.json
- *   - {date}/{strategy}/{symbol}/positions.json
- *   - {date}/{strategy}/{symbol}/backtest.json
- *   - {date}/{strategy}/{symbol}/comparison.json
- *   - trading_data/trading_positions_{date}.csv
- *
- * 各文件的字段规范见 docs/DATA-SPEC.md。
+ * 实际值来自项目根目录 `datasource.config.json` 的 `data.frontendBaseUrl`，
+ * 可用 `VITE_DATA_FRONTEND_BASE_URL` 覆盖。
  */
-export const FRONTEND_DATA_BASE_URL = '/frontend-data'
+import { datasourceConfig } from '@/data/config'
+
+export const FRONTEND_DATA_BASE_URL = datasourceConfig.data.frontendBaseUrl

@@ -94,7 +94,7 @@ function planReplayRuns(dayMs, dayIndex) {
 }
 
 /** 无信号回测的权益曲线：全程平线（没有交易，权益不变） */
-function flatEquityCsv(dayMs) {
+function flatEquityPoints(dayMs) {
   const points = []
   for (let i = 0; i < WARMUP_DAYS; i += 1) {
     const ms = dayMs - (WARMUP_DAYS - 1 - i) * MS_PER_DAY
@@ -104,7 +104,7 @@ function flatEquityCsv(dayMs) {
       cash: INITIAL_CASH,
     })
   }
-  return equityToCsv(points)
+  return points
 }
 
 /**
@@ -156,7 +156,9 @@ function buildReplayRun(run) {
     result.accounts[0].peak_equity = INITIAL_CASH
     result.accounts[0].max_drawdown = 0
     result.accounts[0].trade_count = 0
-    return { result, equityCsv: flatEquityCsv(run.dayMs) }
+    const dailyEquity = flatEquityPoints(run.dayMs)
+    result.daily_equity = dailyEquity
+    return { result, equityCsv: equityToCsv(dailyEquity) }
   }
 
   // 单日成交量级远小于跨年回测，缩到个位数更可信

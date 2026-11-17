@@ -18,56 +18,111 @@ export interface DatedPosition extends Position {
   date: string
 }
 
-/** 判断首列是否为时间戳数据行（用于跳过表头） */
-function isDataRow(line: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}/.test(line.split(',')[0])
+/** 从 [start,end) 取数字列；空串/非法返回 null */
+function numberField(line: string, start: number, end: number): number | null {
+  if (start >= end) return null
+  const value = Number(line.slice(start, end))
+  return Number.isFinite(value) ? value : null
 }
 
-/** 安全数字解析：空串/非数返回 undefined */
-function num(s: string | undefined): number | undefined {
-  if (s == null || s === '') return undefined
-  const v = Number(s)
-  return Number.isNaN(v) ? undefined : v
+/**
+ * 固定格式时间解析：`YYYY-MM-DD[ T]HH:MM:SS[Z|+HH:MM]`。
+ *
+ * 避免每行 Date.parse 的字符串状态机开销；无法识别时返回 null。
+ */
+function parseTimestamp(ts: string): number | null {
+  if (ts.length < 19) return null
+  if (ts.charCodeAt(4) !== 45 || ts.charCodeAt(7) !== 45) return null
+  if (ts.charCodeAt(10) !== 32 && ts.charCodeAt(10) !== 84) return null
+  const year = Number(ts.slice(0, 4))
+  const month = Number(ts.slice(5, 7))
+  const day = Number(ts.slice(8, 10))
+  const hour = Number(ts.slice(11, 13))
+  const minute = Number(ts.slice(14, 16))
+  const second = Number(ts.slice(17, 19))
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day) ||
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute) ||
+    !Number.isFinite(second) ||
+    month < 1 || month > 12 ||
+    day < 1 || day > 31 ||
+    hour > 23 || minute > 59 || second > 59
+  ) {
+    return null
+  }
+  let ms = Date.UTC(year, month - 1, day, hour, minute, second)
+  const rest = ts.slice(19)
+  const offset = /^([+-])(\d{2}):?(\d{2})/.exec(rest)
+  if (offset) {
+    const sign = offset[1] === '+' ? 1 : -1
+    ms -= sign * (Number(offset[2]) * 3600 + Number(offset[3]) * 60) * 1000
+  }
+  return Math.floor(ms / 1000)
 }
 
-/** 解析单行 CSV 为 RawKlinePoint，无法解析返回 null */
-function parseRow(line: string): RawKlinePoint | null {
-  const cols = line.split(',')
-  if (cols.length < 5) return null
-  const tsStr = cols[0]
-  const open = num(cols[1])
-  const high = num(cols[2])
-  const low = num(cols[3])
-  const close = num(cols[4])
-  if (open == null || high == null || low == null || close == null) return null
-  // 用 ISO 'T' 形式解析，确保按 UTC 正确解释 +00:00 偏移
-  const ms = Date.parse(tsStr.replace(' ', 'T'))
-  if (Number.isNaN(ms)) return null
+/**
+ * 解析单行 CSV（不分配列数组），无法解析返回 null。
+ * 行格式：`timestamp,open,high,low,close[,volume][,...]`
+ */
+export function parseKlineLine(line: string): RawKlinePoint | null {
+  if (line.length < 21) return null
+  const c1 = line.indexOf(',')
+  if (c1 <= 0) return null
+  const c2 = line.indexOf(',', c1 + 1)
+  if (c2 < 0) return null
+  const c3 = line.indexOf(',', c2 + 1)
+  if (c3 < 0) return null
+  const c4 = line.indexOf(',', c3 + 1)
+  if (c4 < 0) return null
+  const c5 = line.indexOf(',', c4 + 1)
+
+  const timestamp = parseTimestamp(line.slice(0, c1))
+  if (timestamp === null) return null
+  const open = numberField(line, c1 + 1, c2)
+  const high = numberField(line, c2 + 1, c3)
+  const low = numberField(line, c3 + 1, c4)
+  const close = numberField(line, c4 + 1, c5 < 0 ? line.length : c5)
+  if (open === null || high === null || low === null || close === null) return null
+
   const point: RawKlinePoint = {
-    timestamp: Math.floor(ms / 1000),
-    datetime: tsStr.slice(0, 19).replace('T', ' '),
+    timestamp,
+    datetime: line.slice(0, 19).replace('T', ' '),
     open,
     high,
     low,
     close,
   }
-  const volume = num(cols[5])
-  if (volume != null) point.volume = volume
+  if (c5 >= 0) {
+    const c6 = line.indexOf(',', c5 + 1)
+    const volume = numberField(line, c5 + 1, c6 < 0 ? line.length : c6)
+    if (volume !== null) point.volume = volume
+  }
   return point
 }
 
 /**
- * 解析纯 OHLC K线 CSV 文本为 [[RawKlinePoint]] 数组
- * @param text CSV 文本，首行可为表头（自动跳过）；每行 `timestamp,open,high,low,close[,volume][,...]`
+ * 解析纯 OHLC K线 CSV 文本为 [[RawKlinePoint]] 数组。
+ *
+ * 单遍扫描：按 `\n` 定位行、按 `,` 定位列，避免 `split` 产生全量中间数组；
+ * 表头与空行由 [[parseKlineLine]] 自然跳过。
  */
 export function parseKlineRaw(text: string): RawKlinePoint[] {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0)
-  if (lines.length === 0) return []
-  const startIdx = isDataRow(lines[0]) ? 0 : 1
+  if (text.length === 0) return []
   const result: RawKlinePoint[] = []
-  for (let i = startIdx; i < lines.length; i++) {
-    const row = parseRow(lines[i])
-    if (row) result.push(row)
+  let pos = 0
+  while (pos < text.length) {
+    let next = text.indexOf('\n', pos)
+    if (next < 0) next = text.length
+    let end = next
+    if (end > pos && text.charCodeAt(end - 1) === 13) end -= 1
+    if (end > pos) {
+      const row = parseKlineLine(text.slice(pos, end))
+      if (row) result.push(row)
+    }
+    pos = next + 1
   }
   return result
 }
@@ -104,6 +159,18 @@ export function extractHm(iso: string | null | undefined): string | null {
   const sep = iso.includes('T') ? iso.indexOf('T') : iso.indexOf(' ')
   if (sep < 0) return null
   return iso.slice(sep + 1, sep + 6)
+}
+
+/**
+ * ISO 时间 → `YYYY-MM-DD HH:MM` 键。
+ * 用完整日期而非 DatedPosition.date，跨日平仓时平仓日才与 K线 bar 对得上。
+ */
+function minuteKey(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const sep = iso.includes('T') ? iso.indexOf('T') : iso.indexOf(' ')
+  if (sep < 0) return null
+  const hm = iso.slice(sep + 1, sep + 6)
+  return `${iso.slice(0, 10)} ${padHM(hm)}`
 }
 
 /** 构造中性（无持仓）KlinePoint，OHLC 保留 */
@@ -174,10 +241,10 @@ export function mergePositions(kline: RawKlinePoint[], positions: DatedPosition[
     else map.set(key, [pos])
   }
   for (const pos of positions) {
-    const eHm = extractHm(pos.entry_time)
-    if (eHm) push(entryMap, `${pos.date} ${padHM(eHm)}`, pos)
-    const xHm = extractHm(pos.exit_time)
-    if (xHm) push(exitMap, `${pos.date} ${padHM(xHm)}`, pos)
+    const entryKey = minuteKey(pos.entry_time)
+    if (entryKey) push(entryMap, entryKey, pos)
+    const exitKey = minuteKey(pos.exit_time)
+    if (exitKey) push(exitMap, exitKey, pos)
   }
 
   // 先构建基础数组，标记 entry/exit bar
@@ -260,6 +327,96 @@ export function mergePositions(kline: RawKlinePoint[], positions: DatedPosition[
       // 该 bar 是任一仓位的平仓点时，保留其已实现收益，不被浮动 ROI 覆盖
       if (bar.is_exit) continue
 
+      if (!bar.position_id) {
+        bar.position_id = pos.position_id
+        bar.entry_price = pos.entry_price
+        bar.position_type = pos.type
+      }
+      bar.pnl_pct = floatingPnl(pos.type, pos.entry_price, kline[i].close)
+    }
+  }
+
+  return result
+}
+
+/** ISO 时间 → epoch 秒；缺失时回退到 date 当天 00:00 */
+function isoSeconds(iso: string | null | undefined, fallbackDate?: string): number | null {
+  const raw = iso || (fallbackDate ? `${fallbackDate}T00:00:00Z` : null)
+  if (!raw) return null
+  const ms = Date.parse(raw)
+  return Number.isNaN(ms) ? null : Math.floor(ms / 1000)
+}
+
+/** 二分查找包含 timestamp 的 bar 下标；早于首根或晚于末根返回 -1 */
+function findBarIndex(bars: RawKlinePoint[], timestamp: number, intervalSeconds: number): number {
+  if (bars.length === 0) return -1
+  if (timestamp < bars[0].timestamp) return -1
+  const last = bars[bars.length - 1]
+  if (timestamp >= last.timestamp + intervalSeconds) return -1
+  let lo = 0
+  let hi = bars.length - 1
+  let answer = 0
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (bars[mid].timestamp <= timestamp) {
+      answer = mid
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
+  }
+  return answer
+}
+
+/**
+ * 在**已重采样**的 K 线上叠加仓位（按时间区间，而非精确分钟）。
+ *
+ * 大周期 bar 的 datetime 是周期起点，仓位可能在周期中间开平；用时间戳二分
+ * 定位所属 bar，开仓/平仓标记落在包含该时刻的 bar 上，持仓期间按收盘价计算
+ * 浮动 ROI。适用于服务端已聚合或前端重采样后的任意周期。
+ */
+export function mergePositionsByTime(
+  kline: RawKlinePoint[],
+  positions: DatedPosition[],
+  intervalSeconds: number,
+): KlinePoint[] {
+  const result = kline.map(neutralKline)
+  if (positions.length === 0) return result
+
+  const interval = intervalSeconds > 0 ? intervalSeconds : 60
+  for (const pos of positions) {
+    const hasEntryTime = Boolean(pos.entry_time)
+    const entryTs = isoSeconds(pos.entry_time, pos.date)
+    const exitTs = isoSeconds(pos.exit_time)
+
+    const entryIdx =
+      hasEntryTime && entryTs !== null ? findBarIndex(kline, entryTs, interval) : -1
+    // 无开仓时间（跨日持仓）：从 `date` 当天第一根开始计算浮动 ROI
+    const fallbackStart = kline.findIndex(bar => bar.datetime.slice(0, 10) >= pos.date)
+    const fillStart = entryIdx >= 0 ? entryIdx : Math.max(0, fallbackStart)
+    const exitIdx = exitTs === null ? -1 : findBarIndex(kline, exitTs, interval)
+    if (entryIdx < 0 && exitIdx < 0 && fallbackStart < 0) continue
+
+    if (entryIdx >= 0) {
+      const bar = result[entryIdx]
+      bar.is_entry = true
+      bar.entry_time = pos.entry_time ?? undefined
+      if (!bar.entries) bar.entries = []
+      bar.entries.push(toEntryInfo(pos))
+    }
+    if (exitIdx >= 0) {
+      const bar = result[exitIdx]
+      bar.is_exit = true
+      bar.exit_time = pos.exit_time ?? undefined
+      if (!bar.exits) bar.exits = []
+      bar.exits.push(toExitInfo(pos, kline[exitIdx].close))
+    }
+
+    const start = fillStart
+    const end = exitIdx >= 0 ? exitIdx : result.length
+    for (let i = start; i < end; i++) {
+      const bar = result[i]
+      if (bar.is_exit) continue
       if (!bar.position_id) {
         bar.position_id = pos.position_id
         bar.entry_price = pos.entry_price

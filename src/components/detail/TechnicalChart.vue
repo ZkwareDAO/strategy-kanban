@@ -15,6 +15,7 @@ import {
 } from '@/indicators'
 import { getStrategyMeta, strategyMeta } from '@/api/strategyMeta'
 import type { BacktestSignal } from '@/models/backtest'
+import type { ChartSignalPoint } from '@/models/detail'
 
 interface Props {
   klineData: KlinePoint[]
@@ -23,6 +24,8 @@ interface Props {
   indicators?: IndicatorType[]
   displayCount?: number
   backplaySignals?: BacktestSignal[]
+  /** v2 实盘/回放信号点（带触发原因与对比状态） */
+  signals?: ChartSignalPoint[]
   /**
    * `klineData` 开头有多少根属于「指标预热段」——只参与指标计算，不参与显示。
    *
@@ -39,6 +42,7 @@ const props = withDefaults(defineProps<Props>(), {
   indicators: () => ['RSI', 'MACD', 'ATR'] as IndicatorType[],
   displayCount: 100,
   warmupCount: 0,
+  signals: () => [] as ChartSignalPoint[],
 })
 
 const emit = defineEmits<{
@@ -53,9 +57,10 @@ onMounted(() => {
   renderChart()
 })
 
-watch([() => props.klineData, () => props.strategy, () => props.indicators, () => props.displayCount, () => props.backplaySignals, () => props.warmupCount], () => {
+// 数组均为不可变替换（父组件每次生成新数组），无需 deep 遍历
+watch([() => props.klineData, () => props.strategy, () => props.indicators, () => props.displayCount, () => props.backplaySignals, () => props.signals, () => props.warmupCount], () => {
   renderChart()
-}, { deep: true })
+})
 
 /** 指标参数来自数据源提供的策略元数据；缺省时各指标使用自身默认参数 */
 function getIndicatorParams(strategyDir: string) {
@@ -387,6 +392,96 @@ function renderChart() {
     }
   }
 
+  // v2 signal markers: reason + comparison status, x aligned to the containing bar
+  const signalByCurve = new Map<number, Array<{ signal: ChartSignalPoint; index: number }>>()
+  if (props.signals.length > 0) {
+    const alignIndex = (time: string): number => {
+      const iso = time.includes('T') ? time : time.replace(' ', 'T') + 'Z'
+      const epoch = Math.floor(Date.parse(iso) / 1000)
+      if (!Number.isFinite(epoch)) return -1
+      let lo = 0
+      let hi = displayData.length - 1
+      let answer = -1
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1
+        if (displayData[mid].timestamp <= epoch) {
+          answer = mid
+          lo = mid + 1
+        } else {
+          hi = mid - 1
+        }
+      }
+      return answer
+    }
+
+    const groups = new Map<
+      string,
+      {
+        source: ChartSignalPoint['source']
+        action: ChartSignalPoint['action']
+        items: Array<{ signal: ChartSignalPoint; index: number }>
+      }
+    >()
+    for (const signal of props.signals) {
+      const index = alignIndex(signal.time)
+      if (index < 0) continue
+      const key = `${signal.source}|${signal.action}`
+      let group = groups.get(key)
+      if (!group) {
+        group = { source: signal.source, action: signal.action, items: [] }
+        groups.set(key, group)
+      }
+      group.items.push({ signal, index })
+    }
+
+    for (const group of groups.values()) {
+      const isLive = group.source === 'live'
+      const isOpen = group.action === 'open'
+      const name = `${isLive ? '实盘' : '回放'}${isOpen ? '开仓' : '平仓'}`
+      const trace = {
+        x: group.items.map(({ index }) => displayData[index].datetime),
+        y: group.items.map(({ signal }) => signal.price),
+        type: 'scatter',
+        mode: 'markers',
+        name,
+        marker: {
+          symbol: group.items.map(() =>
+            isOpen ? (isLive ? 'circle' : 'diamond') : (isLive ? 'x' : 'square'),
+          ),
+          size: isOpen ? 11 : 9,
+          color: group.items.map(({ signal }) =>
+            isOpen
+              ? signal.direction === 'long'
+                ? (isLive ? '#22c55e' : '#3b82f6')
+                : (isLive ? '#ef4444' : '#f97316')
+              : (isLive ? '#f59e0b' : '#9333ea'),
+          ),
+          line: { width: 1, color: 'white' },
+        },
+        hovertext: group.items.map(({ signal, index }) => {
+          const parts = [
+            `<b>${isLive ? '实盘' : '回放'} ${signal.direction === 'long' ? '做多' : '做空'}${isOpen ? '开仓' : '平仓'}</b>`,
+            `价格: ${signal.price.toFixed(2)}`,
+            `时间: ${signal.time}`,
+          ]
+          if (signal.reason) parts.push(`原因: ${signal.reason}`)
+          if (signal.status) parts.push(`对比: ${signal.status}`)
+          const indicatorText = getIndicatorText(index)
+          if (indicatorText) {
+            parts.push('--- 技术指标 ---')
+            parts.push(indicatorText)
+          }
+          return parts.join('<br>')
+        }),
+        hoverinfo: 'text',
+        xaxis: 'x',
+        yaxis: 'y',
+      } as Data
+      traces.push(trace)
+      signalByCurve.set(traces.length - 1, group.items)
+    }
+  }
+
   // Collect subplot configs
   const subplotConfigs: { name: string; yaxis: string; range?: [number, number] }[] = []
   let subplotIndex = 2
@@ -524,6 +619,22 @@ function renderChart() {
       const exitCurveIndex = entryPoints.length > 0 ? 2 : 1
 
       for (const point of eventData.points) {
+        const signalItems = signalByCurve.get(point.curveNumber)
+        if (signalItems) {
+          const item = signalItems[point.pointNumber]
+          const bar = item ? displayData[item.index] : undefined
+          if (bar) {
+            emit('barClick', {
+              datetime: bar.datetime,
+              open: bar.open,
+              high: bar.high,
+              low: bar.low,
+              close: bar.close,
+              pointNumber: item!.index,
+            })
+            return
+          }
+        }
         if (point.curveNumber === entryCurveIndex && entryPoints.length > 0) {
           // 点击开仓点
           const entryPoint = entryPoints[point.pointNumber]
