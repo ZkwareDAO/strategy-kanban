@@ -2,58 +2,95 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import StrategyList from '@/components/strategy/StrategyList.vue'
-import type { StrategySummary } from '@/models/runtime'
+import type { Runtime, StrategySummary } from '@/models/runtime'
+import type { Position } from '@/models/position'
+import type { StrategyPerformance } from '@/models/performance'
 
 describe('StrategyList', () => {
-  const mockSummaries: StrategySummary[] = [
-    { strategy: 'demo_trend', runtime_count: 7, position_count: 4, avg_roi: 2.35 },
-    { strategy: 'demo_breakout', runtime_count: 2, position_count: 1, avg_roi: -1.12 },
-    { strategy: 'demo_volatility', runtime_count: 5, position_count: 1, avg_roi: 0.5 },
+  const mockRuntimes: Runtime[] = [
+    {
+      runtime_name: 'DEMO_TREND_BTCUSDT_LIVE',
+      dir_name: 'DEMO_TREND',
+      strategy: 'DEMO_TREND',
+      symbol: 'BTCUSDT',
+      trading_mode: 'live',
+      status: 'success',
+      display_name: 'DEMO_TREND',
+    },
   ]
+
+  const mockPositions: Record<string, Position[]> = {}
+
+  const mockSummaries: StrategySummary[] = [
+    {
+      strategy: 'DEMO_TREND',
+      display_name: '示例趋势',
+      position_count: 1,
+      completed_count: 1,
+      holding_count: 0,
+      win_rate: 100,
+      avg_roi: 2.5,
+    },
+  ]
+
+  const mockPerformances: Record<string, StrategyPerformance> = {
+    DEMO_TREND: {
+      strategy_name: 'DEMO_TREND',
+      total_trades: 2,
+      winning_trades: 1,
+      losing_trades: 1,
+      win_rate: 0.5,
+      total_pnl: 2.5,
+      max_leverage: 2,
+      mode: 'live',
+      open_trades: 1,
+      floating_pnl: 0.75,
+    },
+  }
+
+  const mountList = (summaries: StrategySummary[] = mockSummaries) =>
+    mount(StrategyList, {
+      props: {
+        summaries,
+        runtimes: mockRuntimes,
+        positions: mockPositions,
+        selectedDate: '20261117',
+        performances: mockPerformances,
+      },
+    })
 
   beforeEach(() => {
     setActivePinia(createPinia())
   })
 
-  it('should render strategy items for each summary', () => {
-    const wrapper = mount(StrategyList, {
-      props: { summaries: mockSummaries },
-    })
+  it('renders strategy display name, token and mode', () => {
+    const wrapper = mountList()
 
-    expect(wrapper.text()).toContain('demo_trend')
-    expect(wrapper.text()).toContain('demo_breakout')
-    expect(wrapper.text()).toContain('demo_volatility')
+    expect(wrapper.text()).toContain('示例趋势')
+    expect(wrapper.text()).toContain('BTC')
+    expect(wrapper.text()).toContain('Product')
   })
 
-  it('should display runtime count and position count', () => {
-    const wrapper = mount(StrategyList, {
-      props: { summaries: mockSummaries },
-    })
+  it('renders realized trade statistics', () => {
+    const wrapper = mountList()
 
-    expect(wrapper.text()).toContain('7') // runtime_count for demo_trend
-    expect(wrapper.text()).toContain('4') // position_count for demo_trend
+    expect(wrapper.text()).toContain('总交易')
+    expect(wrapper.text()).toContain('2')
+    expect(wrapper.text()).toContain('胜率')
+    expect(wrapper.text()).toContain('50.0%')
+    expect(wrapper.text()).toContain('盈亏')
+    expect(wrapper.text()).toContain('2.5000')
   })
 
-  it('should display positive ROI with plus sign', () => {
-    const wrapper = mount(StrategyList, {
-      props: { summaries: mockSummaries },
-    })
+  it('renders open position statistics separately', () => {
+    const wrapper = mountList()
 
-    expect(wrapper.text()).toContain('+2.35%')
+    expect(wrapper.text()).toContain('持仓 1')
+    expect(wrapper.text()).toContain('0.7500')
   })
 
-  it('should display negative ROI with minus sign', () => {
-    const wrapper = mount(StrategyList, {
-      props: { summaries: mockSummaries },
-    })
-
-    expect(wrapper.text()).toContain('-1.12%')
-  })
-
-  it('should show empty state when no summaries', () => {
-    const wrapper = mount(StrategyList, {
-      props: { summaries: [] },
-    })
+  it('shows empty state when no summaries', () => {
+    const wrapper = mountList([])
 
     expect(wrapper.text()).toContain('暂无策略数据')
   })

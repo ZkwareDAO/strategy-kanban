@@ -11,12 +11,12 @@ describe('ModeSelector', () => {
   it('should render mode labels with counts', () => {
     const wrapper = mount(ModeSelector, {
       props: {
-        counts: { live: 13, paper_trading: 20, smoking: 11 },
+        counts: { live: 13, paper_trading: 20, smoking: 11, unknown: 0 },
         modelValue: 'paper_trading',
       },
     })
 
-    expect(wrapper.text()).toContain('Live')
+    expect(wrapper.text()).toContain('Product')
     expect(wrapper.text()).toContain('13')
     expect(wrapper.text()).toContain('Paper')
     expect(wrapper.text()).toContain('20')

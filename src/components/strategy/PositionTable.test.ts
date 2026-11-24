@@ -32,12 +32,13 @@ describe('PositionTable', () => {
     setActivePinia(createPinia())
   })
 
-  it('should render table with positions', () => {
+  it('should render positions', () => {
     const wrapper = mount(PositionTable, {
       props: { positions: mockPositions },
     })
 
-    expect(wrapper.find('table').exists()).toBe(true)
+    expect(wrapper.find('.position-table').exists()).toBe(true)
+    expect(wrapper.findAll('.position-row')).toHaveLength(2)
     expect(wrapper.text()).toContain('00:15')
     expect(wrapper.text()).toContain('10:55')
   })
@@ -92,6 +93,6 @@ describe('PositionTable', () => {
       props: { positions: [] },
     })
 
-    expect(wrapper.text()).toContain('暂无持仓数据')
+    expect(wrapper.text()).toContain('当日无持仓')
   })
 })
