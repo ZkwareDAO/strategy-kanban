@@ -57,6 +57,36 @@ describe('services/livePerformance', () => {
       expect(result[0].realizedPnl).toBe(5)
     })
 
+    it('keeps the latest OPEN snapshot for floating pnl', () => {
+      const earlier = row({
+        positionId: 'p1',
+        status: 'OPEN',
+        realizedPnl: 19.242,
+        day: '20261116',
+      })
+      const later = row({
+        positionId: 'p1',
+        status: 'OPEN',
+        realizedPnl: 62.6221,
+        day: '20261117',
+      })
+
+      const result = dedupeLivePositions([earlier, later])
+
+      expect(result).toHaveLength(1)
+      expect(result[0].status).toBe('OPEN')
+      expect(result[0].realizedPnl).toBe(62.6221)
+    })
+
+    it('does not let an older OPEN snapshot overwrite a newer one', () => {
+      const earlier = row({ positionId: 'p1', status: 'OPEN', realizedPnl: 19.242, day: '20261116' })
+      const later = row({ positionId: 'p1', status: 'OPEN', realizedPnl: 62.6221, day: '20261117' })
+
+      const result = dedupeLivePositions([later, earlier])
+
+      expect(result[0].realizedPnl).toBe(62.6221)
+    })
+
     it('keeps distinct position ids', () => {
       const result = dedupeLivePositions([
         row({ positionId: 'p1' }),
@@ -134,6 +164,37 @@ describe('services/livePerformance', () => {
       expect(getLivePositions).toHaveBeenCalledWith('20261022', 'A', 'BTCUSDT')
       expect(result).toHaveLength(1)
       expect(result[0].status).toBe('CLOSED')
+    })
+
+    it('uses the latest OPEN snapshot when loading a multi-day range', async () => {
+      const dayValues: Record<string, number> = {
+        '20261108': 19.242,
+        '20261116': 41.5,
+        '20261117': 62.6221,
+      }
+      const getLivePositions = vi.fn(async (day: string) => [
+        row({
+          positionId: 'newobv-open-1',
+          status: 'OPEN',
+          realizedPnl: dayValues[day],
+          day,
+        }),
+      ])
+      const days: CatalogDay[] = Object.keys(dayValues).map((day) => ({
+        day,
+        strategies: ['DEMO_VOLUME_4H_1'],
+        hasLive: true,
+        hasBacktest: true,
+        updatedAt: '',
+      }))
+
+      const result = await loadLivePositions(days, {
+        repository: { getLivePositions },
+      })
+
+      expect(result).toHaveLength(1)
+      expect(result[0].status).toBe('OPEN')
+      expect(result[0].realizedPnl).toBe(62.6221)
     })
 
     it('returns empty when there are no days', async () => {

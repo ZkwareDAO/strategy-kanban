@@ -39,7 +39,13 @@ export async function loadLivePositions(
   return dedupeLivePositions(chunks.flat())
 }
 
-/** 跨日快照去重（保留 CLOSED） */
+/**
+ * 跨日快照去重。
+ *
+ * - 只要区间内出现过 CLOSED，就保留 CLOSED（最终盈亏）；
+ * - 仍为 OPEN 时保留 `day` 最新的快照，使“持仓中浮盈”取区间末日值，
+ *   而不是区间起点的旧快照。
+ */
 export function dedupeLivePositions(rows: LivePositionRow[]): LivePositionRow[] {
   const byKey = new Map<string, LivePositionRow>()
   for (const row of rows) {
@@ -47,7 +53,15 @@ export function dedupeLivePositions(rows: LivePositionRow[]): LivePositionRow[] 
       ? `id|${row.positionId}`
       : `${row.strategy}|${row.symbol}|${row.entryTime}`
     const previous = byKey.get(key)
-    if (!previous || (previous.status !== 'CLOSED' && row.status === 'CLOSED')) {
+
+    if (!previous) {
+      byKey.set(key, row)
+      continue
+    }
+    // CLOSED 已是最终值，不再被后续 OPEN 覆盖
+    if (previous.status === 'CLOSED') continue
+    // 平仓快照优先；否则用更晚一天的 OPEN 快照
+    if (row.status === 'CLOSED' || row.day >= previous.day) {
       byKey.set(key, row)
     }
   }

@@ -102,7 +102,7 @@ frontend-data/
 - 策略级文件，行级带 `symbol`。
 - `status`：`OPEN` / `CLOSED`；`side`：`long` / `short`。
 - `realized_pnl` 是金额，区间统计按它累加；`pnl_pct` 是百分数（`1.9073` = 1.9073%）。
-- 跨日合并按 `position_id` 去重，`CLOSED` 优先。
+- 跨日合并按 `position_id` 去重：`CLOSED` 优先；仍为 `OPEN` 时取区间内最新一天的快照。
 
 ### live_signals.csv / backtest_signals.csv
 
