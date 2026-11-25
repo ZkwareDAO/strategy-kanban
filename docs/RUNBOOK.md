@@ -131,14 +131,14 @@ K 线 Range：
 
 ```bash
 KB=$(node -p "require('./datasource.config.json').data.klineBaseUrl")
-curl -i -H 'Range: bytes=0-0' "http://localhost:3000$KB/1m/BTCUSDT_1m.csv"
+curl -i -H 'Range: bytes=0-0' "http://localhost:3000$KB/1m/CL_1m.csv"
 # 期望 206 + Content-Range，且 Content-Length 为 1
 ```
 
 数据服务健康检查：
 
 ```bash
-curl -I -H 'Range: bytes=0-0' http://127.0.0.1:3001/data/klines/1m/BTCUSDT_1m.csv
+curl -I -H 'Range: bytes=0-0' http://127.0.0.1:3001/data/klines/1m/CL_1m.csv
 ```
 
 ## 7. 常见问题

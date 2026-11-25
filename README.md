@@ -74,7 +74,7 @@ kline-data/
 
 ```bash
 npm install
-npm run sample-data   # 生成虚拟 v2 数据并链接 public/
+npm run sample-data   # 生成虚拟 v2 数据（大宗商品代码）并链接 public/
 npm run dev
 ```
 

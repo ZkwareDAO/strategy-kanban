@@ -2,11 +2,7 @@
  * 虚构示例策略定义
  *
  * 这些策略与本项目使用方的真实策略无关：前缀、逻辑描述、指标组合均为
- * 便于演示而编造，仅用于把页面填满。
- *
- * 前缀刻意不落在 `src/models/runtime.ts` 的 PREFIX_STRATEGY_MAP 中——
- * `extractDisplayPrefix` 未命中映射时会回退为 runtime_name 的首段，
- * 正好得到 `DEMOEMA` 这类短名，因此无需改动前端代码。
+ * 便于演示而编造，仅用于把页面填满。示例标的统一使用大宗商品期货代码。
  */
 
 /**
@@ -20,7 +16,7 @@ export const STRATEGIES = [
     dirName: 'DEMOEMA_1H_1',
     sourceStrategy: 'demo_ema_cross',
     tradingMode: 'live',
-    symbols: ['BTCUSDT', 'ETHUSDT'],
+    symbols: ['CL', 'GC'],
     leverage: 5,
     /** 日均开仓次数的期望值，决定图上标记的密度 */
     tradesPerDay: 1.6,
@@ -36,7 +32,7 @@ export const STRATEGIES = [
     dirName: 'DEMOBOLL_4H_1',
     sourceStrategy: 'demo_boll_reversion',
     tradingMode: 'paper_trading',
-    symbols: ['ETHUSDT', 'SOLUSDT'],
+    symbols: ['GC', 'SI'],
     leverage: 3,
     tradesPerDay: 1.0,
     holdMinutes: [240, 900],
@@ -46,7 +42,7 @@ export const STRATEGIES = [
     dirName: 'DEMOATR_15M_1',
     sourceStrategy: 'demo_atr_breakout',
     tradingMode: 'smoking',
-    symbols: ['BTCUSDT', 'SOLUSDT'],
+    symbols: ['NG', 'ZC'],
     leverage: 10,
     tradesPerDay: 2.4,
     holdMinutes: [30, 180],

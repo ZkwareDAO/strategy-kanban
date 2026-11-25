@@ -21,13 +21,15 @@ const MINUTES_PER_DAY = 1440
 export const DAILY_HISTORY_DAYS = 540
 
 /**
- * 示例标的：均为公开市场符号，基准价与波动率为便于观察而设定的虚构值。
- * `decimals` 控制价格小数位，贴近各标的常见报价精度。
+ * 示例标的：大宗商品期货代码，基准价与波动率为便于观察而设定的虚构值。
+ * `decimals` 控制价格小数位，贴近各品种常见报价精度。
  */
 export const SYMBOLS = [
-  { symbol: 'BTCUSDT', basePrice: 64000, dailyVol: 0.028, decimals: 1, baseVolume: 35 },
-  { symbol: 'ETHUSDT', basePrice: 3200, dailyVol: 0.034, decimals: 2, baseVolume: 420 },
-  { symbol: 'SOLUSDT', basePrice: 148, dailyVol: 0.045, decimals: 3, baseVolume: 1800 },
+  { symbol: 'CL', basePrice: 75.4, dailyVol: 0.022, decimals: 2, baseVolume: 12000 },
+  { symbol: 'NG', basePrice: 3.15, dailyVol: 0.04, decimals: 3, baseVolume: 9000 },
+  { symbol: 'GC', basePrice: 2380, dailyVol: 0.012, decimals: 1, baseVolume: 3500 },
+  { symbol: 'SI', basePrice: 28.4, dailyVol: 0.022, decimals: 3, baseVolume: 2800 },
+  { symbol: 'ZC', basePrice: 452, dailyVol: 0.016, decimals: 2, baseVolume: 6500 },
 ]
 
 /** CSV 表头（与 docs/DATA-SPEC.md 第 6 节一致） */

@@ -41,10 +41,10 @@ function p2(n) {
  * emptyEvery 表示每隔几天该标的出现一次无信号回测（0 = 从不，1 = 总是）。
  */
 const REPLAY_STRATEGIES = [
-  { strategyId: 'demo_ema_cross', symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'], emptyEvery: 0 },
-  { strategyId: 'demo_boll_reversion', symbols: ['ETHUSDT', 'SOLUSDT'], emptyEvery: 2 },
+  { strategyId: 'demo_ema_cross', symbols: ['CL', 'GC', 'SI'], emptyEvery: 0 },
+  { strategyId: 'demo_boll_reversion', symbols: ['GC', 'SI'], emptyEvery: 2 },
   // 总是无信号：用于演示"当天跑了但没动作"的策略如何被开关过滤
-  { strategyId: 'demo_atr_breakout', symbols: ['BTCUSDT', 'SOLUSDT'], emptyEvery: 1 },
+  { strategyId: 'demo_atr_breakout', symbols: ['NG', 'ZC'], emptyEvery: 1 },
 ]
 
 /** 判断某个 run 是否为无信号回测 */

@@ -28,8 +28,9 @@ import { buildBacktestRun, planBacktestRuns, equityToCsv } from './backtest.mjs'
 
 /** 固定的窗口起点，避免测试结果随运行日期漂移 */
 const WINDOW_START = Date.UTC(2026, 0, 5)
-const WINDOW_DAYS = 3
-const BTC = SYMBOLS.find((s) => s.symbol === 'BTCUSDT')
+// 14 天可稳定覆盖跨日仓位与持仓中（低波动商品数据下短窗口可能没有样本）
+const WINDOW_DAYS = 14
+const PRIMARY = SYMBOLS.find((s) => s.symbol === 'CL')
 
 describe('rng', () => {
   test('同种子产生相同序列', () => {
@@ -56,8 +57,8 @@ describe('rng', () => {
   })
 
   test('hashSeed 稳定且能区分不同输入', () => {
-    expect(hashSeed('BTCUSDT')).toBe(hashSeed('BTCUSDT'))
-    expect(hashSeed('BTCUSDT')).not.toBe(hashSeed('ETHUSDT'))
+    expect(hashSeed('CL')).toBe(hashSeed('CL'))
+    expect(hashSeed('CL')).not.toBe(hashSeed('GC'))
   })
 
   test('gaussian 均值接近 0，不产生 NaN', () => {
@@ -70,7 +71,7 @@ describe('rng', () => {
 })
 
 describe('K线合成', () => {
-  const { rows, csv } = generateMinuteSeries(BTC, WINDOW_START, WINDOW_DAYS, BTC.basePrice)
+  const { rows, csv } = generateMinuteSeries(PRIMARY, WINDOW_START, WINDOW_DAYS, PRIMARY.basePrice)
 
   test('每天 1440 根，首行为规范表头', () => {
     expect(rows).toHaveLength(WINDOW_DAYS * 1440)
@@ -101,7 +102,7 @@ describe('K线合成', () => {
   })
 
   test('相同输入可复现', () => {
-    const again = generateMinuteSeries(BTC, WINDOW_START, WINDOW_DAYS, BTC.basePrice)
+    const again = generateMinuteSeries(PRIMARY, WINDOW_START, WINDOW_DAYS, PRIMARY.basePrice)
     expect(again.csv).toBe(csv)
   })
 
@@ -120,7 +121,7 @@ describe('K线合成', () => {
   })
 
   test('日线序列时间升序且长度超过窗口（含历史回溯）', () => {
-    const market = generateSymbolMarket(BTC, WINDOW_START, WINDOW_DAYS)
+    const market = generateSymbolMarket(PRIMARY, WINDOW_START, WINDOW_DAYS)
     const lines = market.dailyCsv.trim().split('\n').slice(1)
     for (let i = 1; i < lines.length; i += 1) {
       expect(lines[i] > lines[i - 1]).toBe(true)
@@ -130,6 +131,18 @@ describe('K线合成', () => {
 })
 
 describe('策略定义', () => {
+  test('示例标的为大宗商品代码，不使用加密货币交易对', () => {
+    for (const symbol of SYMBOLS) {
+      expect(symbol.symbol).toMatch(/^[A-Z]{1,4}$/)
+      expect(symbol.symbol).not.toMatch(/USDT|USDC|BUSD/)
+    }
+    for (const strategy of STRATEGIES) {
+      for (const symbol of strategy.symbols) {
+        expect(SYMBOLS.some((item) => item.symbol === symbol)).toBe(true)
+      }
+    }
+  })
+
   test('manifest 展开为 策略 × 标的，字段齐全', () => {
     const manifest = buildManifest('20260105')
     expect(manifest.date).toBe('20260105')
@@ -149,7 +162,7 @@ describe('策略定义', () => {
 
   test('runtime_name 形如 {dir}_{SYMBOL}_{MODE}', () => {
     const strategy = STRATEGIES[0]
-    expect(runtimeName(strategy, 'BTCUSDT')).toBe(`${strategy.dirName}_BTCUSDT_LIVE`)
+    expect(runtimeName(strategy, 'CL')).toBe(`${strategy.dirName}_CL_LIVE`)
   })
 
   test('覆盖三种 trading_mode，使概览页每个筛选 tab 都有数据', () => {
@@ -198,8 +211,8 @@ describe('策略定义', () => {
 
 describe('交易推导', () => {
   const strategy = STRATEGIES[0]
-  const market = generateSymbolMarket(BTC, WINDOW_START, WINDOW_DAYS)
-  const trades = simulateTrades(strategy, 'BTCUSDT', market.minuteRows)
+  const market = generateSymbolMarket(PRIMARY, WINDOW_START, WINDOW_DAYS)
+  const trades = simulateTrades(strategy, 'CL', market.minuteRows)
 
   test('产出了交易，且开仓价取自真实 K 线收盘价', () => {
     expect(trades.length).toBeGreaterThan(0)
@@ -232,7 +245,7 @@ describe('交易推导', () => {
   })
 
   describe('每日仓位切分', () => {
-    const byDate = buildDailyPositions(strategy, 'BTCUSDT', trades)
+    const byDate = buildDailyPositions(strategy, 'CL', trades)
     const all = [...byDate.values()].flat()
 
     test('时间戳落在整分钟——mergePositions 按 HH:MM 与 1m K 线匹配', () => {
@@ -278,15 +291,15 @@ describe('交易推导', () => {
   })
 
   describe('回放与对比', () => {
-    const byDate = buildDailyPositions(strategy, 'BTCUSDT', trades)
+    const byDate = buildDailyPositions(strategy, 'CL', trades)
     const [date, positions] = [...byDate.entries()].find(([, p]) => p.length > 0)
     const compact = date.replace(/-/g, '')
     const backtestTrades = buildBacktestTrades(
       strategy,
-      'BTCUSDT',
+      'CL',
       positions,
       market.minuteRows,
-      BTC.decimals,
+      PRIMARY.decimals,
     )
 
     test('回放交易按时间升序，side 取值合法', () => {
@@ -300,7 +313,7 @@ describe('交易推导', () => {
     })
 
     test('对比报告的统计量彼此自洽', () => {
-      const cmp = buildComparison(strategy, 'BTCUSDT', compact, positions, backtestTrades)
+      const cmp = buildComparison(strategy, 'CL', compact, positions, backtestTrades)
       expect(cmp.matched).toBeLessThanOrEqual(cmp.total_live)
       expect(cmp.matched).toBeLessThanOrEqual(cmp.total_backtest)
       expect(cmp.accuracy_score).toBeGreaterThanOrEqual(0)
@@ -312,7 +325,7 @@ describe('交易推导', () => {
     })
 
     test('时间与价格偏差统计非负，且 max >= avg', () => {
-      const cmp = buildComparison(strategy, 'BTCUSDT', compact, positions, backtestTrades)
+      const cmp = buildComparison(strategy, 'CL', compact, positions, backtestTrades)
       expect(cmp.time_accuracy.max_diff_seconds).toBeGreaterThanOrEqual(
         cmp.time_accuracy.avg_diff_seconds,
       )
@@ -323,11 +336,11 @@ describe('交易推导', () => {
 
   describe('策略表现 CSV', () => {
     const dayStart = WINDOW_START + 86400000
-    const rows = buildPerformanceRows(strategy, 'BTCUSDT', trades, dayStart, dayStart + 86399999)
+    const rows = buildPerformanceRows(strategy, 'CL', trades, dayStart, dayStart + 86399999)
 
     test('strategy_name 为 {dir}_{SYMBOL}，去掉末段后等于 manifest 的 strategy', () => {
       for (const r of rows) {
-        expect(r.strategy_name).toBe(`${strategy.dirName}_BTCUSDT`)
+        expect(r.strategy_name).toBe(`${strategy.dirName}_CL`)
         expect(r.strategy_name.replace(/_[^_]+$/, '')).toBe(strategy.dirName)
       }
     })
@@ -345,7 +358,7 @@ describe('交易推导', () => {
 
     test('快照语义：同一笔跨天出现时 created_at 一致，保证前端能去重', () => {
       const nextDay = dayStart + 86400000
-      const rowsNext = buildPerformanceRows(strategy, 'BTCUSDT', trades, nextDay, nextDay + 86399999)
+      const rowsNext = buildPerformanceRows(strategy, 'CL', trades, nextDay, nextDay + 86399999)
       const keyOf = (r) => `${r.strategy_name}|${r.asset}|${r.created_at}`
       const byId = new Map(rows.map((r) => [keyOf(r), r]))
       const overlap = rowsNext.filter((r) => byId.has(keyOf(r)))
@@ -388,7 +401,7 @@ describe('历史回测', () => {
 
   test('存在同标的重跑，用于演示列表页拆行', () => {
     const sameSymbol = runs.filter(
-      (r) => r.strategyId === 'demo_ema_cross' && r.symbol === 'BTCUSDT',
+      (r) => r.strategyId === 'demo_ema_cross' && r.symbol === 'CL',
     )
     expect(sameSymbol.length).toBeGreaterThanOrEqual(2)
   })

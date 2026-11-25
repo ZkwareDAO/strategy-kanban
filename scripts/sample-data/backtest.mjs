@@ -212,26 +212,26 @@ export function planBacktestRuns(todayMs) {
   const batchDay = todayMs - 3 * MS_PER_DAY
   const batchBase = batchDay + (10 * 3600 + 19 * 60 + 7) * 1000
   const range1Start = todayMs - 400 * MS_PER_DAY
-  push('demo_ema_cross', 'BTCUSDT', batchBase, range1Start, 400)
-  push('demo_ema_cross', 'ETHUSDT', batchBase + 43000, range1Start, 400)
-  push('demo_ema_cross', 'SOLUSDT', batchBase + 91000, range1Start, 400)
+  push('demo_ema_cross', 'CL', batchBase, range1Start, 400)
+  push('demo_ema_cross', 'GC', batchBase + 43000, range1Start, 400)
+  push('demo_ema_cross', 'SI', batchBase + 91000, range1Start, 400)
 
-  // 情形 2：同一天下午重跑 BTCUSDT（同标的同区间）→ 拆成独立的第 2 行
-  push('demo_ema_cross', 'BTCUSDT', batchDay + (16 * 3600 + 2 * 60 + 41) * 1000, range1Start, 400)
+  // 情形 2：同一天下午重跑 CL（同标的同区间）→ 拆成独立的第 2 行
+  push('demo_ema_cross', 'CL', batchDay + (16 * 3600 + 2 * 60 + 41) * 1000, range1Start, 400)
 
   // 情形 3：另一策略、另一天、另一回测区间 → 各自成行
   const otherDay = todayMs - 8 * MS_PER_DAY
   const range2Start = todayMs - 220 * MS_PER_DAY
   push(
     'demo_boll_reversion',
-    'ETHUSDT',
+    'GC',
     otherDay + (9 * 3600 + 5 * 60 + 12) * 1000,
     range2Start,
     220,
   )
   push(
     'demo_boll_reversion',
-    'SOLUSDT',
+    'SI',
     otherDay + (9 * 3600 + 6 * 60 + 3) * 1000,
     range2Start,
     220,
@@ -241,12 +241,12 @@ export function planBacktestRuns(todayMs) {
   const range3Start = todayMs - 540 * MS_PER_DAY
   push(
     'demo_atr_breakout',
-    'BTCUSDT',
+    'NG',
     thirdDay + (21 * 3600 + 44 * 60 + 30) * 1000,
     range3Start,
     540,
   )
-  push('demo_atr_breakout', 'SOLUSDT', thirdDay + (21 * 3600 + 45 * 60 + 8) * 1000, range3Start, 540)
+  push('demo_atr_breakout', 'ZC', thirdDay + (21 * 3600 + 45 * 60 + 8) * 1000, range3Start, 540)
 
   return runs
 }

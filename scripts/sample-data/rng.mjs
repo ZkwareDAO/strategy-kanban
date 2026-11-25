@@ -21,7 +21,7 @@ export function createRng(seed) {
 /**
  * 把任意字符串散列为 32 位种子（FNV-1a）。
  *
- * 让每个交易对/策略拥有各自稳定的种子，互不干扰：BTCUSDT 的行情不会因为
+ * 让每个交易对/策略拥有各自稳定的种子，互不干扰：CL 的行情不会因为
  * 新增一个标的而改变。
  */
 export function hashSeed(text) {

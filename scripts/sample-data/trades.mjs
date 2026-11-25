@@ -107,6 +107,15 @@ export function simulateTrades(strategy, symbol, rows) {
     cursor = trade.exitIdx + gap
   }
 
+  // 示例数据需要稳定演示「持仓中」：若窗口末笔恰好已平仓，保留最后一笔为 OPEN
+  if (trades.length > 0 && !trades.some((trade) => trade.exitTs === null)) {
+    const last = trades[trades.length - 1]
+    last.exitIdx = null
+    last.exitTs = null
+    last.exitPrice = null
+    last.realizedPnl = null
+  }
+
   return trades
 }
 
